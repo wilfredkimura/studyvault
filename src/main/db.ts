@@ -27,6 +27,10 @@ export const dbService = {
     return pythonWorker.sendCommand('db_add_document', { doc });
   },
 
+  updateDocumentFolder: (id: string, folderName: string | null) => {
+    return pythonWorker.sendCommand('db_update_document_folder', { id, folder_name: folderName });
+  },
+
   deleteDocument: (id: string) => {
     return pythonWorker.sendCommand('db_delete_document', { id });
   },

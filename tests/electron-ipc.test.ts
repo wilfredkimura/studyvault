@@ -50,6 +50,7 @@ describe('Electron IPC Handler Registration', () => {
   it('should register document database handlers', () => {
     expect(registeredChannels.has('db:get-documents')).toBe(true);
     expect(registeredChannels.has('db:add-document')).toBe(true);
+    expect(registeredChannels.has('db:update-document-folder')).toBe(true);
     expect(registeredChannels.has('db:delete-document')).toBe(true);
     expect(registeredChannels.has('db:search-documents')).toBe(true);
   });
@@ -75,8 +76,13 @@ describe('Electron IPC Handler Registration', () => {
     expect(registeredChannels.has('db:add-history')).toBe(true);
   });
 
-  it('should register python worker command runner and dialog pickers', () => {
+  it('should register python worker command runner, dialog pickers, and window controls', () => {
     expect(registeredChannels.has('worker:run-command')).toBe(true);
     expect(registeredChannels.has('dialog:open-file')).toBe(true);
+    expect(registeredChannels.has('dialog:open-directory')).toBe(true);
+    expect(registeredChannels.has('window:minimize')).toBe(true);
+    expect(registeredChannels.has('window:maximize')).toBe(true);
+    expect(registeredChannels.has('window:close')).toBe(true);
+    expect(registeredChannels.has('window:is-maximized')).toBe(true);
   });
 });

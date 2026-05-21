@@ -60,6 +60,7 @@ app.on('window-all-closed', () => {
 // Setup IPC database handlers
 ipcMain.handle('db:get-documents', async () => dbService.getDocuments());
 ipcMain.handle('db:add-document', async (_, doc) => dbService.addDocument(doc));
+ipcMain.handle('db:update-document-folder', async (_, id, folderName) => dbService.updateDocumentFolder(id, folderName));
 ipcMain.handle('db:delete-document', async (_, id) => dbService.deleteDocument(id));
 ipcMain.handle('db:search-documents', async (_, query) => dbService.searchDocuments(query));
 
@@ -109,4 +110,73 @@ ipcMain.handle('dialog:open-file', async () => {
     size: stats.size,
     type: path.extname(filePath).substring(1).toLowerCase(),
   };
+});
+
+function scanDirectory(dirPath: string, fileList: any[] = []) {
+  try {
+    const files = fs.readdirSync(dirPath);
+    for (const file of files) {
+      const filePath = path.join(dirPath, file);
+      const stats = fs.statSync(filePath);
+      if (stats.isDirectory()) {
+        scanDirectory(filePath, fileList);
+      } else {
+        const ext = path.extname(file).substring(1).toLowerCase();
+        const supportedExtensions = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls', 'txt', 'md'];
+        if (supportedExtensions.includes(ext)) {
+          fileList.push({
+            path: filePath,
+            name: file,
+            size: stats.size,
+            type: ext,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error scanning directory:', err);
+  }
+  return fileList;
+}
+
+ipcMain.handle('dialog:open-directory', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  const dirPath = result.filePaths[0];
+  const folderName = path.basename(dirPath);
+  const files = scanDirectory(dirPath);
+  return {
+    folderName,
+    files,
+  };
+});
+
+ipcMain.handle('window:minimize', () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+  }
+});
+
+ipcMain.handle('window:maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+ipcMain.handle('window:close', () => {
+  if (mainWindow) {
+    mainWindow.close();
+  }
+});
+
+ipcMain.handle('window:is-maximized', () => {
+  return mainWindow ? mainWindow.isMaximized() : false;
 });

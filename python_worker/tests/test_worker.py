@@ -30,7 +30,7 @@ def test_conversion_processing():
     assert "output_name" in result
     assert result["format"] == "pdf"
     assert result["output_name"] == "lecture_converted.pdf"
-    assert "lecture.docx" in result["output_path"]
+    assert "lecture_converted.pdf" in result["output_path"]
 
 def test_ai_query_mock_provider():
     args = {

@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
   hash TEXT UNIQUE NOT NULL,
-  content_extracted TEXT
+  content_extracted TEXT,
+  folder_name TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tags (
@@ -127,6 +128,18 @@ def init_db(db_path: str):
     _db_conn.executescript(schema)
     _db_conn.commit()
 
+    # Migration check for folder_name
+    try:
+        cur = _db_conn.cursor()
+        cur.execute("PRAGMA table_info(documents)")
+        columns = [col['name'] for col in cur.fetchall()]
+        if 'folder_name' not in columns:
+            _db_conn.execute("ALTER TABLE documents ADD COLUMN folder_name TEXT")
+            _db_conn.commit()
+    except Exception as e:
+        import sys
+        print(f"Failed to migrate db column folder_name: {e}", file=sys.stderr)
+
 def get_conn():
     global _db_conn
     if _db_conn is None:
@@ -164,11 +177,11 @@ def add_document(doc):
         raise ValueError(f"Duplicate document: A file with the same content hash already exists in the database ('{dup['name']}').")
         
     cur.execute("""
-        INSERT INTO documents (id, name, type, path, size, hash, content_extracted)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO documents (id, name, type, path, size, hash, content_extracted, folder_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         doc['id'], doc['name'], doc['type'], doc['path'], 
-        doc['size'], file_hash, text
+        doc['size'], file_hash, text, doc.get('folder_name')
     ))
     conn.commit()
     return True
@@ -177,6 +190,17 @@ def delete_document(doc_id):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    conn.commit()
+    return True
+
+def update_document_folder(doc_id, folder_name):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE documents 
+        SET folder_name = ?, updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+    """, (folder_name, doc_id))
     conn.commit()
     return True
 

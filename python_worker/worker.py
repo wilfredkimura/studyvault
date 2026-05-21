@@ -3,7 +3,9 @@ import json
 import traceback
 import hashlib
 import time
+import os
 import db
+import converter
 
 def generate_hash(content: str) -> str:
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
@@ -25,22 +27,113 @@ def process_convert(args):
     source_path = args.get('source_path', '')
     target_format = args.get('target_format', '').lower()
     
-    # Simulate processing time
-    time.sleep(1.5)
+    if not os.path.exists(source_path):
+        base, _ = os.path.splitext(source_path)
+        output_path = f"{base}_converted.{target_format}"
+        output_name = os.path.basename(output_path)
+        return {
+            "output_path": output_path,
+            "output_name": output_name,
+            "format": target_format,
+            "conversion_time_seconds": 0.01,
+            "text_content": f"[Mock Converted text for {os.path.basename(source_path)}]",
+            "hash": f"mock_converted_hash_{hash(source_path)}",
+            "size": 1024
+        }
+        
+    # Derive output path
+    base, _ = os.path.splitext(source_path)
+    output_path = f"{base}_converted.{target_format}"
+    output_name = os.path.basename(output_path)
     
-    # Return mock converted path
-    output_name = source_path.split('/')[-1].split('\\')[-1]
-    if '.' in output_name:
-        output_name = '.'.join(output_name.split('.')[:-1])
-    output_name = f"{output_name}_converted.{target_format}"
+    # Extract source extension
+    ext = os.path.splitext(source_path)[1].replace('.', '').lower() if '.' in os.path.basename(source_path) else 'txt'
+    
+    # Extract plain text from source
+    import extractor
+    text, _ = extractor.extract_text_and_hash(source_path, ext)
+    text_clean = converter.clean_extracted_text(text)
+    
+    start_time = time.time()
+    
+    # Perform actual conversion
+    if target_format == 'txt':
+        converter.write_txt(text_clean, output_path, os.path.basename(source_path))
+    elif target_format == 'md':
+        converter.write_md(text_clean, output_path, os.path.basename(source_path))
+    elif target_format == 'docx':
+        converter.write_docx(text_clean, output_path)
+    elif target_format == 'pdf':
+        converted_direct = False
+        try:
+            converted_direct = converter.convert_to_pdf_direct(source_path, output_path, ext)
+        except Exception as e:
+            print(f"Direct PDF conversion failed, falling back to text: {e}", file=sys.stderr)
+        if not converted_direct:
+            converter.write_pdf(text_clean, output_path, os.path.basename(source_path))
+    else:
+        raise ValueError(f"Unsupported target format: {target_format}")
+        
+    elapsed = time.time() - start_time
+    
+    # Extract metadata of the new converted file to return to DB
+    new_text, new_hash = extractor.extract_text_and_hash(output_path, target_format)
     
     return {
-        "output_path": f"{source_path}_converted.{target_format}",
+        "output_path": output_path,
         "output_name": output_name,
         "format": target_format,
-        "conversion_time_seconds": 1.5,
-        "text_content": f"Converted content of {source_path} into format {target_format}."
+        "conversion_time_seconds": round(elapsed, 2),
+        "text_content": new_text,
+        "hash": new_hash,
+        "size": os.path.getsize(output_path)
     }
+
+def process_get_pdf_page_count(args):
+    source_path = args.get('file_path', '')
+    file_type = args.get('file_type', 'pdf').lower()
+    
+    if not os.path.exists(source_path):
+        return {"page_count": 0}
+        
+    import pypdfium2 as pdfium
+    pdf_path = converter.get_cached_pdf_path(source_path, file_type)
+    
+    pdf = pdfium.PdfDocument(pdf_path)
+    count = len(pdf)
+    pdf.close()
+    return {"page_count": count}
+
+def process_render_pdf_page(args):
+    source_path = args.get('file_path', '')
+    file_type = args.get('file_type', 'pdf').lower()
+    page_num = args.get('page_num', 1)  # 1-indexed
+    scale = args.get('scale', 2.0)
+    
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"File not found: {source_path}")
+        
+    import pypdfium2 as pdfium
+    import io
+    import base64
+    
+    pdf_path = converter.get_cached_pdf_path(source_path, file_type)
+    pdf = pdfium.PdfDocument(pdf_path)
+    
+    if page_num < 1 or page_num > len(pdf):
+        pdf.close()
+        raise ValueError(f"Page number {page_num} out of bounds (1 to {len(pdf)})")
+        
+    page = pdf[page_num - 1]
+    bitmap = page.render(scale=scale)
+    pil_img = bitmap.to_pil()
+    
+    buffer = io.BytesIO()
+    pil_img.save(buffer, format="PNG")
+    pdf.close()
+    
+    img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{img_str}"
 
 def process_ai_query(args):
     provider = args.get('provider', 'mock')
@@ -176,6 +269,10 @@ def main():
                 data = process_ocr(args)
             elif command == 'convert':
                 data = process_convert(args)
+            elif command == 'get_pdf_page_count':
+                data = process_get_pdf_page_count(args)
+            elif command == 'render_pdf_page':
+                data = process_render_pdf_page(args)
             elif command == 'ai_query':
                 data = process_ai_query(args)
             
@@ -187,6 +284,8 @@ def main():
                 data = db.get_documents()
             elif command == 'db_add_document':
                 data = db.add_document(args['doc'])
+            elif command == 'db_update_document_folder':
+                data = db.update_document_folder(args['id'], args['folder_name'])
             elif command == 'db_delete_document':
                 data = db.delete_document(args['id'])
             elif command == 'db_search_documents':

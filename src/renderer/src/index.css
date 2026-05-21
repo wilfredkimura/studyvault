@@ -212,7 +212,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--spacing-lg);
+  padding: 0 0 0 var(--spacing-lg);
   -webkit-app-region: drag; /* Electron window dragging */
 }
 
@@ -406,4 +406,44 @@ body {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+/* Custom Titlebar Window Controls */
+.window-controls {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.window-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: var(--titlebar-height);
+  background: transparent;
+  border: none;
+  color: var(--color-on-surface);
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+  outline: none;
+}
+
+.window-control-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.window-control-btn:active {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.window-control-btn.close:hover {
+  background-color: #e81123;
+  color: white;
+}
+
+.window-control-btn.close:active {
+  background-color: #f1707a;
+  color: white;
 }

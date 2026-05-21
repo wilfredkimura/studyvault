@@ -85,4 +85,49 @@ describe('React Frontend UI Component', () => {
     expect(localStorage.getItem('studyvault_apikey')).toBe('testkey-12345');
     expect(localStorage.getItem('studyvault_provider')).toBe('gemini');
   });
+
+  it('should render custom titlebar window controls', () => {
+    render(<App />);
+
+    // Custom minimize, maximize/restore, and close buttons
+    expect(screen.getByTitle('Minimize')).toBeInTheDocument();
+    expect(screen.getByTitle('Maximize')).toBeInTheDocument();
+    expect(screen.getByTitle('Close')).toBeInTheDocument();
+  });
+
+  it('should render folder controls in Library screen', () => {
+    render(<App />);
+
+    // Navigate to Library
+    fireEvent.click(screen.getByText('Library'));
+
+    // Check directory import button
+    expect(screen.getByText('Import Folder')).toBeInTheDocument();
+
+    // Check All Folders grouping filter
+    expect(screen.getByText('All Folders')).toBeInTheDocument();
+  });
+
+  it('should support toggling viewer modes between Reader and Layout', () => {
+    render(<App />);
+
+    // Navigate to Library
+    fireEvent.click(screen.getByText('Library'));
+
+    // Click a file to open Reader screen
+    const docItem = screen.getByText('Quantum Physics Lecture 1.pdf');
+    fireEvent.click(docItem);
+
+    // Verify Viewer Mode selector controls are available
+    const readerViewBtn = screen.getByText('Reader View (Text)');
+    const layoutViewBtn = screen.getByText('Layout View (Image)');
+    expect(readerViewBtn).toBeInTheDocument();
+    expect(layoutViewBtn).toBeInTheDocument();
+
+    // Toggle mode to Layout View
+    fireEvent.click(layoutViewBtn);
+    expect(layoutViewBtn).toHaveStyle({
+      background: 'var(--color-primary)'
+    });
+  });
 });

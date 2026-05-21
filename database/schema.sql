@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
   hash TEXT UNIQUE NOT NULL, -- SHA-256 for deduplication and caching
-  content_extracted TEXT -- full text content extracted for search index
+  content_extracted TEXT, -- full text content extracted for search index
+  folder_name TEXT -- folder grouping
 );
 
 -- 2. Tags Table

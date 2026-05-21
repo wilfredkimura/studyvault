@@ -4,6 +4,7 @@ export interface StudyVaultAPI {
   // Document Operations
   getDocuments: () => Promise<any[]>;
   addDocument: (doc: any) => Promise<any>;
+  updateDocumentFolder: (id: string, folderName: string | null) => Promise<any>;
   deleteDocument: (id: string) => Promise<any>;
   searchDocuments: (query: string) => Promise<any[]>;
 
@@ -36,12 +37,20 @@ export interface StudyVaultAPI {
 
   // Shell & Dialog functions
   openFileDialog: () => Promise<{ path: string; name: string; size: number; type: string } | null>;
+  openDirectoryDialog: () => Promise<{ folderName: string; files: any[] } | null>;
+
+  // Window Controls
+  minimizeWindow: () => Promise<void>;
+  maximizeWindow: () => Promise<void>;
+  closeWindow: () => Promise<void>;
+  isWindowMaximized: () => Promise<boolean>;
 }
 
 const api: StudyVaultAPI = {
   // Documents
   getDocuments: () => ipcRenderer.invoke('db:get-documents'),
   addDocument: (doc) => ipcRenderer.invoke('db:add-document', doc),
+  updateDocumentFolder: (id, folderName) => ipcRenderer.invoke('db:update-document-folder', id, folderName),
   deleteDocument: (id) => ipcRenderer.invoke('db:delete-document', id),
   searchDocuments: (query) => ipcRenderer.invoke('db:search-documents', query),
 
@@ -74,6 +83,13 @@ const api: StudyVaultAPI = {
 
   // Dialog
   openFileDialog: () => ipcRenderer.invoke('dialog:open-file'),
+  openDirectoryDialog: () => ipcRenderer.invoke('dialog:open-directory'),
+
+  // Window Controls
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
+  isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
 };
 
 // Safe bridge exposure to window.api
