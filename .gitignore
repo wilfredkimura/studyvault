@@ -49,6 +49,12 @@ dist/
 dist-electron/
 out/
 build/
+release/
+
+# PyInstaller build outputs
+python_worker/build/
+python_worker/dist/
+*.spec
 
 # SQLite databases & temp db files
 *.db

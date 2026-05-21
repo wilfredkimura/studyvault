@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import readline from 'readline';
+import { app } from 'electron';
 
 export class PythonWorkerManager {
   private workerProcess: ChildProcess | null = null;
@@ -13,20 +14,34 @@ export class PythonWorkerManager {
   }
 
   private startWorker() {
-    const pythonScript = path.join(__dirname, '../../python_worker/worker.py');
-    const requirementsTxt = path.join(__dirname, '../../python_worker/requirements.txt');
-    
-    // Check if script exists, if not, wait (e.g. workspace is initializing)
-    if (!fs.existsSync(pythonScript)) {
-      console.warn(`Python worker script not found at ${pythonScript}. Waiting for worker files...`);
+    let workerPath: string;
+    let workerArgs: string[] = [];
+
+    if (app.isPackaged) {
+      // In production (packaged), run the compiled standalone executable from resources
+      const exeName = process.platform === 'win32' ? 'studyvault-worker.exe' : 'studyvault-worker';
+      workerPath = path.join(process.resourcesPath, exeName);
+    } else {
+      // In development, run python worker.py script
+      workerPath = 'python';
+      const pythonScript = path.join(__dirname, '../../python_worker/worker.py');
+      workerArgs = ['-u', pythonScript];
+      
+      if (!fs.existsSync(pythonScript)) {
+        console.warn(`Python worker script not found at ${pythonScript}. Waiting for worker files...`);
+        return;
+      }
+    }
+
+    if (app.isPackaged && !fs.existsSync(workerPath)) {
+      console.error(`Packaged python worker binary not found at ${workerPath}`);
       return;
     }
 
-    console.log(`Spawning Python worker: python ${pythonScript}`);
+    console.log(`Spawning worker process: ${workerPath} ${workerArgs.join(' ')}`);
 
-    // Span python child process
-    // Using standard unbuffered output (-u) so prints are flushed immediately
-    this.workerProcess = spawn('python', ['-u', pythonScript]);
+    // Spawn child process
+    this.workerProcess = spawn(workerPath, workerArgs);
 
     if (!this.workerProcess) {
       console.error('Failed to spawn Python worker process.');
