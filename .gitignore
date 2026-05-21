@@ -1,0 +1,86 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumented dirs created by nyc
+.nyc_output
+
+# Grunt folders
+.grunt
+
+# node-modules
+node_modules/
+jspm_packages/
+
+# Snowpack dependency directory
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Output directory used by default bundlers
+dist/
+dist-electron/
+out/
+build/
+
+# SQLite databases & temp db files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+database/*.db
+database/*.db-journal
+database/*.db-shm
+database/*.db-wal
+database/*.sqlite
+
+# Python build and cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+python_worker/__pycache__/
+python_worker/tests/__pycache__/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environments
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
