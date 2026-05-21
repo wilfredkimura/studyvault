@@ -9,7 +9,7 @@ This repository is structured as a monorepo containing:
 
 ---
 
-## 🎨 Key Features
+## Key Features
 
 * **Local-First & Private**: Your lecture slides, documents, and annotations are stored securely in a local SQLite database on your machine.
 * **Document Converter**: Drag-and-drop support for `.docx`, `.pptx`, and other academic slides, converting them automatically into clean, uniform PDFs.
@@ -23,7 +23,7 @@ This repository is structured as a monorepo containing:
 
 ---
 
-## 📂 Repository Structure
+## Repository Structure
 
 ```
 studyvault/
@@ -44,7 +44,7 @@ studyvault/
 
 ---
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 To run this project locally, ensure you have the following installed:
 * **Node.js** (v18 or higher)
@@ -52,7 +52,7 @@ To run this project locally, ensure you have the following installed:
 
 ---
 
-## 🚀 Desktop App Setup & Execution
+## Desktop App Setup & Execution
 
 ### 1. Install Node Dependencies
 From the repository root, install the required packages:
@@ -90,6 +90,6 @@ The output builds will compile and save in the `release/` folder.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License. See the [LICENSE](file:///c:/Users/kimushzyyy/Documents/studyvault/LICENSE) file for more information.
