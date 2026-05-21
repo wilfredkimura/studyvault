@@ -3,6 +3,7 @@ import {
   Download,
   BookOpen,
   Folder,
+  FolderOpen,
   RefreshCw,
   Sparkles,
   CheckCircle,
@@ -345,31 +346,7 @@ export default function App() {
         height: '70px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <svg
-            viewBox="0 0 512 512"
-            style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: 'var(--rounded-default)',
-              display: 'block'
-            }}
-          >
-            <defs>
-              <linearGradient id="logo-gradient-inline" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="var(--color-primary)" />
-                <stop offset="100%" stopColor="var(--color-secondary)" />
-              </linearGradient>
-            </defs>
-            <rect width="512" height="512" rx="128" fill="url(#logo-gradient-inline)" />
-            <path
-              d="M320 160 C320 110, 192 110, 192 160 C192 210, 320 230, 320 300 C320 350, 192 350, 192 300"
-              fill="none"
-              stroke="var(--color-on-primary)"
-              strokeWidth="80"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <FolderOpen size={24} style={{ color: 'var(--color-primary)', flexShrink: 0 }} />
           <span style={{
             fontFamily: 'var(--font-family-display)',
             fontSize: '22px',
