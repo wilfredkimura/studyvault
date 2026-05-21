@@ -5,6 +5,7 @@ export interface StudyVaultAPI {
   getDocuments: () => Promise<any[]>;
   addDocument: (doc: any) => Promise<any>;
   updateDocumentFolder: (id: string, folderName: string | null) => Promise<any>;
+  updateDocumentName: (id: string, name: string) => Promise<any>;
   deleteDocument: (id: string) => Promise<any>;
   searchDocuments: (query: string) => Promise<any[]>;
 
@@ -51,6 +52,7 @@ const api: StudyVaultAPI = {
   getDocuments: () => ipcRenderer.invoke('db:get-documents'),
   addDocument: (doc) => ipcRenderer.invoke('db:add-document', doc),
   updateDocumentFolder: (id, folderName) => ipcRenderer.invoke('db:update-document-folder', id, folderName),
+  updateDocumentName: (id, name) => ipcRenderer.invoke('db:update-document-name', id, name),
   deleteDocument: (id) => ipcRenderer.invoke('db:delete-document', id),
   searchDocuments: (query) => ipcRenderer.invoke('db:search-documents', query),
 

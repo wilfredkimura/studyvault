@@ -82,6 +82,7 @@ ipcMain.handle('db:add-history', async (_, record) => dbService.addHistoryRecord
 
 ipcMain.handle('db:get-ai-cache', async (_, hash) => dbService.getAiCache(hash));
 ipcMain.handle('db:save-ai-cache', async (_, cache) => dbService.saveAiCache(cache));
+ipcMain.handle('db:update-document-name', async (_, id, name) => dbService.updateDocumentName(id, name));
 
 // Setup IPC Python worker handler
 ipcMain.handle('worker:run-command', async (_, command, args) => {

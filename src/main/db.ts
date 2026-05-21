@@ -93,6 +93,10 @@ export const dbService = {
 
   saveAiCache: (cache: { id: string; input_hash: string; response: string; model: string }) => {
     return pythonWorker.sendCommand('db_save_ai_cache', { cache });
+  },
+
+  updateDocumentName: (id: string, name: string) => {
+    return pythonWorker.sendCommand('db_update_document_name', { id, name });
   }
 };
 export default dbService;

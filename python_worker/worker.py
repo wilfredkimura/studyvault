@@ -63,6 +63,8 @@ def process_convert(args):
         converter.write_md(text_clean, output_path, os.path.basename(source_path))
     elif target_format == 'docx':
         converter.write_docx(text_clean, output_path)
+    elif target_format == 'pptx':
+        converter.write_pptx(text_clean, output_path)
     elif target_format == 'pdf':
         converted_direct = False
         try:
@@ -140,9 +142,13 @@ def process_ai_query(args):
     prompt = args.get('prompt', '')
     api_key = args.get('api_key', '')
     model = args.get('model', '')
+    context = args.get('context', '')
     
     if not prompt:
         return {"response": "Prompt cannot be empty.", "model": model or "default-model", "cached": False}
+        
+    if context:
+        prompt = f"Context:\n{context}\n\nQuestion:\n{prompt}"
         
     # Generate prompt hash for caching
     prompt_hash = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
@@ -184,12 +190,22 @@ def process_ai_query(args):
         if provider == 'gemini':
             if not resolved_model:
                 resolved_model = 'gemini-1.5-flash'
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:generateContent?key={api_key}"
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}]
             }
-            res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-            res.raise_for_status()
+            # Try stable v1 endpoint first
+            url = f"https://generativelanguage.googleapis.com/v1/models/{resolved_model}:generateContent?key={api_key}"
+            try:
+                res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+                res.raise_for_status()
+            except requests.exceptions.HTTPError as he:
+                # If 404, fallback to v1beta
+                if he.response is not None and he.response.status_code == 404:
+                    url_beta = f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:generateContent?key={api_key}"
+                    res = requests.post(url_beta, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+                    res.raise_for_status()
+                else:
+                    raise he
             res_data = res.json()
             response_text = res_data['candidates'][0]['content']['parts'][0]['text']
             
@@ -286,6 +302,8 @@ def main():
                 data = db.add_document(args['doc'])
             elif command == 'db_update_document_folder':
                 data = db.update_document_folder(args['id'], args['folder_name'])
+            elif command == 'db_update_document_name':
+                data = db.update_document_name(args['id'], args['name'])
             elif command == 'db_delete_document':
                 data = db.delete_document(args['id'])
             elif command == 'db_search_documents':

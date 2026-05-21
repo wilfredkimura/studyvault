@@ -31,6 +31,7 @@ declare global {
       getDocuments: () => Promise<any[]>;
       addDocument: (doc: any) => Promise<any>;
       updateDocumentFolder: (id: string, folderName: string | null) => Promise<any>;
+      updateDocumentName: (id: string, name: string) => Promise<any>;
       deleteDocument: (id: string) => Promise<any>;
       searchDocuments: (query: string) => Promise<any[]>;
       getTags: () => Promise<any[]>;
@@ -591,6 +592,7 @@ export default function App() {
               history={history}
               showNotification={showNotification}
               onRefresh={loadAllData}
+              onViewFile={handleViewFile}
             />
           )}
 
@@ -1061,7 +1063,7 @@ const parsePagesFromText = (content: string, type: string) => {
     
     for (let i = 0; i < pageMarkers.length; i++) {
       const start = pageMarkers[i].index + pageMarkers[i].marker.length;
-      const end = (i + 1 < pageMarkers.length) ? pageMarkers[i].index : normalized.length;
+      const end = (i + 1 < pageMarkers.length) ? pageMarkers[i + 1].index : normalized.length;
       let pageText = normalized.substring(start, end).trim();
       pages.push(pageText || `(Empty Page/Slide/Sheet: ${pageMarkers[i].marker})`);
     }
@@ -1246,8 +1248,9 @@ function PageImageSheet({ file, pageNum, scale }: { file: any, pageNum: number, 
     return () => { active = false; };
   }, [isVisible, file.path, file.type, pageNum, scale]);
 
-  const aspectRatio = 1 / 1.414;
-  const width = 600 * scale;
+  const isLandscape = file?.type?.toLowerCase() === 'pptx';
+  const aspectRatio = isLandscape ? 16 / 9 : 1 / 1.414;
+  const width = (isLandscape ? 800 : 600) * scale;
   const height = width / aspectRatio;
 
   return (
@@ -1257,9 +1260,9 @@ function PageImageSheet({ file, pageNum, scale }: { file: any, pageNum: number, 
       data-page-num={pageNum}
       style={{
         width: '100%',
-        maxWidth: `${Math.round(800 * scale)}px`,
+        maxWidth: isLandscape ? `${Math.round(960 * scale)}px` : `${Math.round(800 * scale)}px`,
         minHeight: isVisible && imgSrc ? 'auto' : `${height}px`,
-        aspectRatio: isVisible && imgSrc ? 'auto' : '1/1.414',
+        aspectRatio: isVisible && imgSrc ? 'auto' : (isLandscape ? '16/9' : '1/1.414'),
         backgroundColor: 'var(--color-surface-container)',
         borderRadius: 'var(--rounded-default)',
         border: '1px solid var(--color-outline-variant)',
@@ -1307,7 +1310,7 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
   const [loadingAi, setLoadingAi] = useState(false);
 
   // Dual view states
-  const [viewerMode, setViewerMode] = useState<'layout' | 'reader'>('reader');
+  const [viewerMode, setViewerMode] = useState<'layout' | 'reader'>('layout');
   const [zoom, setZoom] = useState(1.0);
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -1795,7 +1798,7 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
 // ----------------------------------------------------
 // 4. CONVERSION SCREEN
 // ----------------------------------------------------
-function ConversionScreen({ documents, history, showNotification, onRefresh }: any) {
+function ConversionScreen({ documents, history, showNotification, onRefresh, onViewFile }: any) {
   const [selectedFileId, setSelectedFileId] = useState('');
   const [targetFormat, setTargetFormat] = useState('pdf');
   const [converting, setConverting] = useState(false);
@@ -1923,7 +1926,7 @@ function ConversionScreen({ documents, history, showNotification, onRefresh }: a
           <div>
             <label className="label-md" style={{ display: 'block', marginBottom: '8px' }}>Select Target Format</label>
             <div style={{ display: 'flex', gap: '8px' }}>
-              {['pdf', 'docx', 'md', 'txt'].map((fmt) => (
+              {['pdf', 'docx', 'pptx', 'md', 'txt'].map((fmt) => (
                 <button
                   key={fmt}
                   onClick={() => setTargetFormat(fmt)}
@@ -1959,25 +1962,82 @@ function ConversionScreen({ documents, history, showNotification, onRefresh }: a
         <div className="glass-panel" style={{ flex: 1.2, padding: 'var(--spacing-lg)' }}>
           <h2 className="headline-sm" style={{ marginBottom: '16px' }}>Conversion Logs</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '350px', overflowY: 'auto' }}>
-            {history.map((hist: any) => (
-              <div key={hist.id} style={{ 
-                padding: '12px', 
-                backgroundColor: 'var(--color-surface-container)', 
-                borderRadius: 'var(--rounded-default)',
-                borderLeft: '3px solid var(--color-primary)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--color-outline)', marginBottom: '4px' }}>
-                  <span>{hist.operation.toUpperCase().replace('_', ' ')}</span>
-                  <span>{hist.timestamp}</span>
+            {history.map((hist: any) => {
+              const outputDoc = documents.find((d: any) => d.id === hist.output_file_id);
+              return (
+                <div key={hist.id} style={{ 
+                  padding: '12px', 
+                  backgroundColor: 'var(--color-surface-container)', 
+                  borderRadius: 'var(--rounded-default)',
+                  borderLeft: '3px solid var(--color-primary)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--color-outline)', marginBottom: '4px' }}>
+                    <span>{hist.operation.toUpperCase().replace('_', ' ')}</span>
+                    <span>{hist.timestamp}</span>
+                  </div>
+                  <div style={{ fontSize: '13px' }}>
+                    <strong>Source:</strong> {hist.source_name}
+                  </div>
+                  <div style={{ fontSize: '13px', marginTop: '2px', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <strong>Output:</strong>
+                    {outputDoc ? (
+                      <>
+                        <span 
+                          onClick={() => onViewFile(outputDoc)}
+                          style={{ 
+                            cursor: 'pointer', 
+                            textDecoration: 'underline', 
+                            color: 'var(--color-primary)',
+                            marginLeft: '4px',
+                            fontWeight: '600'
+                          }}
+                          title="Click to view in Reader"
+                        >
+                          {outputDoc.name}
+                        </span>
+                        <button 
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const newName = prompt('Enter new filename:', outputDoc.name);
+                            if (newName && newName.trim() && newName.trim() !== outputDoc.name) {
+                              try {
+                                if (window.api) {
+                                  await window.api.updateDocumentName(outputDoc.id, newName.trim());
+                                } else {
+                                  const docToRename = mockDb.documents.find(d => d.id === outputDoc.id);
+                                  if (docToRename) docToRename.name = newName.trim();
+                                  const histToRename = mockDb.history.find(h => h.id === hist.id);
+                                  if (histToRename) histToRename.output_name = newName.trim();
+                                }
+                                showNotification('File renamed successfully', 'success');
+                                onRefresh();
+                              } catch (err: any) {
+                                showNotification(`Rename failed: ${err.message}`, 'error');
+                              }
+                            }
+                          }}
+                          style={{
+                            marginLeft: '12px',
+                            background: 'var(--color-surface-container-highest)',
+                            border: '1px solid var(--color-outline-variant)',
+                            borderRadius: 'var(--rounded-sm)',
+                            padding: '2px 6px',
+                            fontSize: '10px',
+                            color: 'var(--color-on-surface-variant)',
+                            cursor: 'pointer',
+                            fontFamily: 'var(--font-family-body)'
+                          }}
+                        >
+                          ✏️ Rename
+                        </button>
+                      </>
+                    ) : (
+                      <span style={{ marginLeft: '4px' }}>{hist.output_name || 'Processed successfully'}</span>
+                    )}
+                  </div>
                 </div>
-                <div style={{ fontSize: '13px' }}>
-                  <strong>Source:</strong> {hist.source_name}
-                </div>
-                <div style={{ fontSize: '13px', marginTop: '2px', color: 'var(--color-primary)' }}>
-                  <strong>Output:</strong> {hist.output_name || 'Processed successfully'}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

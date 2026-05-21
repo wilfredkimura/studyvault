@@ -204,6 +204,18 @@ def update_document_folder(doc_id, folder_name):
     conn.commit()
     return True
 
+def update_document_name(doc_id, name):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE documents 
+        SET name = ?, updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+    """, (name, doc_id))
+    conn.commit()
+    return True
+
+
 def search_documents(query):
     conn = get_conn()
     cur = conn.cursor()

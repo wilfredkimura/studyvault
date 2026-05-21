@@ -118,3 +118,32 @@ def test_documents_delete_fts_sync():
     cur = conn.cursor()
     cur.execute("SELECT * FROM documents_fts WHERE id = 'doc-103'")
     assert cur.fetchone() is None
+
+def test_update_document_name():
+    doc = {
+        'id': 'doc-104',
+        'name': 'Original Name.pdf',
+        'type': 'pdf',
+        'path': '/docs/original.pdf',
+        'size': 100,
+        'hash': 'hash-rename-104',
+        'content_extracted': 'Study material content.'
+    }
+    db.add_document(doc)
+    
+    # Rename document
+    db.update_document_name('doc-104', 'New Name.pdf')
+    
+    # Verify it updated in documents table
+    docs = db.get_documents()
+    assert len(docs) == 1
+    assert docs[0]['name'] == 'New Name.pdf'
+    
+    # Verify it updated in FTS table
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM documents_fts WHERE id = 'doc-104'")
+    fts_row = cur.fetchone()
+    assert fts_row is not None
+    assert fts_row['name'] == 'New Name.pdf'
+
