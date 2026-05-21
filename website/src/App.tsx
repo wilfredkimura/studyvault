@@ -1,23 +1,23 @@
 import { useState, useEffect } from 'react';
-import { 
-  Download, 
-  BookOpen, 
-  Folder, 
-  RefreshCw, 
-  Sparkles, 
-  CheckCircle, 
-  Cpu, 
-  Bookmark, 
-  Edit3, 
+import {
+  Download,
+  BookOpen,
+  Folder,
+  RefreshCw,
+  Sparkles,
+  CheckCircle,
+  Cpu,
+  Bookmark,
+  Edit3,
   Play
 } from 'lucide-react';
 
 const GithubIcon = ({ size = 16 }: { size?: number }) => (
-  <svg 
-    height={size} 
-    width={size} 
-    viewBox="0 0 16 16" 
-    fill="currentColor" 
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    fill="currentColor"
     style={{ display: 'inline-block', verticalAlign: 'text-bottom' }}
   >
     <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
@@ -108,7 +108,7 @@ export default function App() {
     'doc-3': ['Page 1: Note - Learn the difference between orthographic and perspective projection']
   });
   const [newAnnotationText, setNewAnnotationText] = useState('');
-  
+
   // AI summarizer state
   const [summaries, setSummaries] = useState<Record<string, string>>({});
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -147,11 +147,11 @@ export default function App() {
         const tag = data.tag_name || 'v1.0.0';
         let installer = '';
         let portable = '';
-        
+
         if (data.assets && Array.isArray(data.assets)) {
           const instAsset = data.assets.find((a: any) => a.name.includes('Setup') && a.name.endsWith('.exe'));
           const portAsset = data.assets.find((a: any) => !a.name.includes('Setup') && a.name.endsWith('.exe'));
-          
+
           if (instAsset) installer = instAsset.browser_download_url;
           if (portAsset) portable = portAsset.browser_download_url;
         }
@@ -186,7 +186,7 @@ export default function App() {
   const openInReader = (doc: MockDoc) => {
     setReadingDoc(doc);
     setActiveTab('reader');
-    
+
     // Add to history or update it
     setReadingHistory(prev => {
       const filtered = prev.filter(h => h.file_id !== doc.id);
@@ -215,7 +215,7 @@ export default function App() {
     if (isSummarizing) return;
     setIsSummarizing(true);
     setSummarizeProgress(0);
-    
+
     const interval = setInterval(() => {
       setSummarizeProgress(prev => {
         if (prev >= 100) {
@@ -223,7 +223,7 @@ export default function App() {
           setIsSummarizing(false);
           setSummaries(s => ({
             ...s,
-            [readingDoc.id]: `### AI Page Summary (Gemini 2.5 Flash)\n\n• **Core Topic**: ${readingDoc.name.replace('.pdf','').replace('.pptx','')}\n• **Key Concepts**: Discusses the central architecture, key data attributes, and engineering methodologies mentioned in the material.\n• **Important Insights**: \n  - Details essential structural mechanisms.\n  - Analyzes the efficiency of local-first paradigms.\n  - Notes specific implementation parameters relevant to examinations and research.`
+            [readingDoc.id]: `### AI Page Summary (Gemini 2.5 Flash)\n\n• **Core Topic**: ${readingDoc.name.replace('.pdf', '').replace('.pptx', '')}\n• **Key Concepts**: Discusses the central architecture, key data attributes, and engineering methodologies mentioned in the material.\n• **Important Insights**: \n  - Details essential structural mechanisms.\n  - Analyzes the efficiency of local-first paradigms.\n  - Notes specific implementation parameters relevant to examinations and research.`
           }));
           return 100;
         }
@@ -235,7 +235,7 @@ export default function App() {
   // Handle mock file conversion
   const handleConvert = () => {
     let sourceName = '';
-    
+
     if (externalFile) {
       sourceName = externalFile.name;
     } else if (selectedFileId) {
@@ -255,11 +255,11 @@ export default function App() {
         if (prev >= 100) {
           clearInterval(interval);
           setIsConverting(false);
-          
+
           const outputName = sourceName.substring(0, sourceName.lastIndexOf('.')) + '.pdf';
           const newDocId = `doc-${Date.now()}`;
           const newDocPath = `C:/Users/kimushzyyy/Documents/studyvault/converted/${outputName}`;
-          
+
           // Add to mock documents
           const newDoc: MockDoc = {
             id: newDocId,
@@ -270,7 +270,7 @@ export default function App() {
             size: externalFile ? externalFile.size : '1.5 MB',
             content: `Converted PDF version of ${sourceName}. Fully indexed and ready for layout reading & annotation.`
           };
-          
+
           setDocuments(prevDocs => [...prevDocs, newDoc]);
 
           // Add to conversion logs
@@ -345,18 +345,31 @@ export default function App() {
         height: '70px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))',
-            width: '32px',
-            height: '32px',
-            borderRadius: 'var(--rounded-default)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--color-on-primary)',
-            fontWeight: 'bold',
-            fontSize: '18px'
-          }}>S</div>
+          <svg
+            viewBox="0 0 512 512"
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: 'var(--rounded-default)',
+              display: 'block'
+            }}
+          >
+            <defs>
+              <linearGradient id="logo-gradient-inline" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="var(--color-primary)" />
+                <stop offset="100%" stopColor="var(--color-secondary)" />
+              </linearGradient>
+            </defs>
+            <rect width="512" height="512" rx="128" fill="url(#logo-gradient-inline)" />
+            <path
+              d="M320 160 C320 110, 192 110, 192 160 C192 210, 320 230, 320 300 C320 350, 192 350, 192 300"
+              fill="none"
+              stroke="var(--color-on-primary)"
+              strokeWidth="80"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
           <span style={{
             fontFamily: 'var(--font-family-display)',
             fontSize: '22px',
@@ -372,19 +385,19 @@ export default function App() {
           <a href="#features" style={{ color: 'var(--color-on-surface-variant)', textDecoration: 'none', fontSize: '14px', fontWeight: 500, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color = '#fff'} onMouseLeave={e => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}>Features</a>
           <a href="#simulator" style={{ color: 'var(--color-on-surface-variant)', textDecoration: 'none', fontSize: '14px', fontWeight: 500, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color = '#fff'} onMouseLeave={e => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}>Interactive Demo</a>
           <a href="#tutorial" style={{ color: 'var(--color-on-surface-variant)', textDecoration: 'none', fontSize: '14px', fontWeight: 500, transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color = '#fff'} onMouseLeave={e => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}>Tutorial</a>
-          
+
           {/* GitHub Handle Icon Link */}
-          <a 
-            href="https://github.com/wilfredkimura/studyvault" 
-            target="_blank" 
+          <a
+            href="https://github.com/wilfredkimura/studyvault"
+            target="_blank"
             rel="noopener noreferrer"
-            style={{ 
-              color: 'var(--color-on-surface-variant)', 
-              display: 'flex', 
-              alignItems: 'center', 
+            style={{
+              color: 'var(--color-on-surface-variant)',
+              display: 'flex',
+              alignItems: 'center',
               gap: '6px',
-              textDecoration: 'none', 
-              fontSize: '14px', 
+              textDecoration: 'none',
+              fontSize: '14px',
               fontWeight: 500,
               padding: '6px 12px',
               borderRadius: 'var(--rounded-default)',
@@ -415,7 +428,7 @@ export default function App() {
 
       {/* Main Container */}
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px', flex: 1 }}>
-        
+
         {/* HERO SECTION */}
         <section style={{
           padding: '80px 0 60px',
@@ -437,7 +450,7 @@ export default function App() {
             alignItems: 'center',
             gap: '8px'
           }}>
-            <Sparkles size={14} /> Local-first academic research vault
+            <Sparkles size={14} /> Local-first academic study area
           </div>
 
           <h1 className="display-lg" style={{ maxWidth: '800px', marginBottom: '24px', color: '#fff' }}>
@@ -461,7 +474,7 @@ export default function App() {
             justifyContent: 'center',
             marginBottom: '16px'
           }}>
-            <a 
+            <a
               href={latestRelease.installerUrl}
               className="btn-pulse"
               style={{
@@ -523,28 +536,28 @@ export default function App() {
             <div className="mockup-body">
               {/* Sidebar */}
               <div className="mockup-sidebar">
-                <div 
+                <div
                   className={`mockup-sidebar-item ${activeTab === 'library' ? 'active' : ''}`}
                   onClick={() => setActiveTab('library')}
                 >
                   <Folder size={16} />
                   <span>Library</span>
                 </div>
-                <div 
+                <div
                   className={`mockup-sidebar-item ${activeTab === 'reader' ? 'active' : ''}`}
                   onClick={() => setActiveTab('reader')}
                 >
                   <BookOpen size={16} />
                   <span>Reader</span>
                 </div>
-                <div 
+                <div
                   className={`mockup-sidebar-item ${activeTab === 'converter' ? 'active' : ''}`}
                   onClick={() => setActiveTab('converter')}
                 >
                   <RefreshCw size={16} />
                   <span>File Conversion</span>
                 </div>
-                <div 
+                <div
                   className={`mockup-sidebar-item ${activeTab === 'history' ? 'active' : ''}`}
                   onClick={() => setActiveTab('history')}
                 >
@@ -562,14 +575,14 @@ export default function App() {
 
               {/* App Main Content Area */}
               <div className="mockup-content">
-                
+
                 {/* 1. LIBRARY TAB */}
                 {activeTab === 'library' && (
                   <div style={{ display: 'flex', gap: '20px', height: '100%' }}>
                     {/* Folders List Sidebar */}
                     <div style={{ width: '160px', display: 'flex', flexDirection: 'column', gap: '6px', borderRight: '1px solid var(--color-outline-variant)', paddingRight: '12px' }}>
                       <div style={{ fontSize: '11px', color: 'var(--color-outline)', fontWeight: 'bold', marginBottom: '4px' }}>FOLDERS</div>
-                      <button 
+                      <button
                         onClick={() => setSelectedFolder('all')}
                         style={{
                           background: selectedFolder === 'all' ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -579,7 +592,7 @@ export default function App() {
                       >
                         📂 All Files
                       </button>
-                      <button 
+                      <button
                         onClick={() => setSelectedFolder('lectures')}
                         style={{
                           background: selectedFolder === 'lectures' ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -589,7 +602,7 @@ export default function App() {
                       >
                         📂 Lecture Slides
                       </button>
-                      <button 
+                      <button
                         onClick={() => setSelectedFolder('research')}
                         style={{
                           background: selectedFolder === 'research' ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -599,7 +612,7 @@ export default function App() {
                       >
                         📂 Research Papers
                       </button>
-                      <button 
+                      <button
                         onClick={() => setSelectedFolder('uncategorized')}
                         style={{
                           background: selectedFolder === 'uncategorized' ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -625,7 +638,7 @@ export default function App() {
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px', overflowY: 'auto' }}>
                         {filteredDocs.map(doc => (
-                          <div 
+                          <div
                             key={doc.id}
                             onClick={() => openInReader(doc)}
                             style={{
@@ -680,7 +693,7 @@ export default function App() {
 
                       {/* Mode Toggles */}
                       <div style={{ display: 'flex', background: 'var(--color-surface-container-low)', padding: '2px', borderRadius: '6px', border: '1px solid var(--color-outline-variant)' }}>
-                        <button 
+                        <button
                           onClick={() => setReaderViewMode('image')}
                           style={{
                             background: readerViewMode === 'image' ? 'var(--color-surface-container-highest)' : 'transparent',
@@ -690,7 +703,7 @@ export default function App() {
                         >
                           Layout View (Slides/Images)
                         </button>
-                        <button 
+                        <button
                           onClick={() => setReaderViewMode('text')}
                           style={{
                             background: readerViewMode === 'text' ? 'var(--color-surface-container-highest)' : 'transparent',
@@ -707,7 +720,7 @@ export default function App() {
                     <div style={{ display: 'flex', flex: 1, gap: '14px', overflow: 'hidden' }}>
                       {/* Left: View Panel */}
                       <div style={{ flex: 1, background: 'var(--color-surface-container-lowest)', border: '1px solid var(--color-outline-variant)', borderRadius: 'var(--rounded-default)', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                        
+
                         {readerViewMode === 'image' ? (
                           /* Layout View Mockup (Maintaining source layouts for PPTX and PDF) */
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
@@ -731,8 +744,8 @@ export default function App() {
                                   🎨 Introduction to Computer Graphics
                                 </div>
                                 <div style={{ fontSize: '10px', lineHeight: 1.4, color: 'var(--color-on-surface-variant)' }}>
-                                  • Rasterization vs Raytracing<br/>
-                                  • Matrix Math & homogeneous coordinates [x, y, z, w]<br/>
+                                  • Rasterization vs Raytracing<br />
+                                  • Matrix Math & homogeneous coordinates [x, y, z, w]<br />
                                   • Vertex shader & Fragment processing logic
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9px', color: 'var(--color-outline)' }}>
@@ -785,7 +798,7 @@ export default function App() {
 
                       {/* Right Sidebar: AI Summary & Annotations */}
                       <div style={{ width: '220px', display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto' }}>
-                        
+
                         {/* Summary Block */}
                         <div style={{ background: 'var(--color-surface-container-low)', border: '1px solid var(--color-outline-variant)', borderRadius: 'var(--rounded-default)', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -806,7 +819,7 @@ export default function App() {
                               {summaries[readingDoc.id]}
                             </div>
                           ) : (
-                            <button 
+                            <button
                               onClick={handleSummarize}
                               style={{
                                 background: 'var(--color-primary-container)', color: 'var(--color-on-primary-container)',
@@ -821,7 +834,7 @@ export default function App() {
                         {/* Annotations Block */}
                         <div style={{ background: 'var(--color-surface-container-low)', border: '1px solid var(--color-outline-variant)', borderRadius: 'var(--rounded-default)', padding: '10px', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff' }}>📝 Page Annotations</span>
-                          
+
                           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', minHeight: '80px', maxHeight: '140px' }}>
                             {(annotations[readingDoc.id] || []).length > 0 ? (
                               (annotations[readingDoc.id] || []).map((ann, idx) => (
@@ -835,8 +848,8 @@ export default function App() {
                           </div>
 
                           <div style={{ display: 'flex', gap: '4px', borderTop: '1px solid var(--color-outline-variant)', paddingTop: '6px' }}>
-                            <input 
-                              type="text" 
+                            <input
+                              type="text"
                               placeholder="Add a study note..."
                               value={newAnnotationText}
                               onChange={e => setNewAnnotationText(e.target.value)}
@@ -846,7 +859,7 @@ export default function App() {
                                 color: '#fff', fontSize: '10px', padding: '4px 6px', borderRadius: '4px', outline: 'none'
                               }}
                             />
-                            <button 
+                            <button
                               onClick={addAnnotation}
                               style={{
                                 background: 'var(--color-secondary)', color: 'var(--color-on-secondary)',
@@ -871,7 +884,7 @@ export default function App() {
                     {/* Convert Input */}
                     <div style={{ background: 'var(--color-surface-container-low)', border: '1px solid var(--color-outline-variant)', borderRadius: 'var(--rounded-default)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        <button 
+                        <button
                           onClick={handleBrowseExternal}
                           style={{
                             background: 'var(--color-surface-container-highest)', color: '#fff',
@@ -893,8 +906,8 @@ export default function App() {
                       )}
 
                       {!externalFile && (
-                        <select 
-                          value={selectedFileId} 
+                        <select
+                          value={selectedFileId}
                           onChange={(e) => setSelectedFileId(e.target.value)}
                           style={{
                             width: '100%',
@@ -915,7 +928,7 @@ export default function App() {
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
                         <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>Converts documents (.docx, .pptx, .epub, etc.) to uniform PDF locally.</span>
-                        <button 
+                        <button
                           onClick={handleConvert}
                           disabled={!selectedFileId && !externalFile || isConverting}
                           style={{
@@ -939,12 +952,12 @@ export default function App() {
                     {/* Conversion Logs */}
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                       <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px', color: 'var(--color-outline)' }}>CONVERSION LOGS</div>
-                      
+
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {conversionLogs.map(log => {
                           const doc = documents.find(d => d.id === log.output_id);
                           return (
-                            <div 
+                            <div
                               key={log.id}
                               style={{
                                 background: 'var(--color-surface-container-low)',
@@ -967,14 +980,14 @@ export default function App() {
                                 <span>Output:</span>
                                 {doc ? (
                                   <>
-                                    <span 
+                                    <span
                                       onClick={() => openInReader(doc)}
                                       style={{ color: 'var(--color-primary)', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
                                       title="Click to view in Reader"
                                     >
                                       {doc.name}
                                     </span>
-                                    <button 
+                                    <button
                                       onClick={() => handleRename(doc.id, doc.name)}
                                       style={{
                                         background: 'var(--color-surface-container-highest)', border: 'none', borderRadius: '3px',
@@ -1011,7 +1024,7 @@ export default function App() {
                       {readingHistory.map(hist => {
                         const matchedDoc = documents.find(d => d.id === hist.file_id);
                         return (
-                          <div 
+                          <div
                             key={hist.file_id}
                             style={{
                               background: 'var(--color-surface-container-low)',
@@ -1032,7 +1045,7 @@ export default function App() {
                               </div>
                             </div>
 
-                            <button 
+                            <button
                               onClick={() => {
                                 if (matchedDoc) {
                                   openInReader(matchedDoc);
@@ -1108,7 +1121,7 @@ export default function App() {
           </div>
 
           <div style={{ maxWidth: '750px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            
+
             <div className="glass-panel" style={{ padding: '20px', display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
               <div style={{
                 background: 'var(--color-primary-container)', color: 'var(--color-on-primary-container)',
@@ -1128,9 +1141,9 @@ export default function App() {
                 width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px', flexShrink: 0
               }}>2</div>
               <div>
-                <h4 style={{ color: '#fff', fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>Configure your Gemini API Key (Optional)</h4>
+                <h4 style={{ color: '#fff', fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>Bring Your Own Key (BYOK) for AI Enhancements (Optional)</h4>
                 <p style={{ fontSize: '13px', color: 'var(--color-on-surface-variant)', lineHeight: 1.5 }}>
-                  Go to settings and paste your Google Gemini API Key. This will unlock the offline-first text summaries and document analyses using the latest optimized `gemini-2.5-flash` model.
+                  Go to settings to configure your credentials. StudyVault supports a local-first **Bring Your Own Key (BYOK)** model that is fully compatible with all major AI providers (including OpenAI, Anthropic Claude, Google Gemini, and custom local/Ollama endpoints). This unlocks automatic page summaries, contextual study guides, and Q&A capabilities while keeping your API keys stored 100% securely on your own machine.
                 </p>
               </div>
             </div>
@@ -1165,25 +1178,25 @@ export default function App() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '13px', color: 'var(--color-outline)' }}>
-            © 2026 StudyVault. All rights reserved. Created by **wilfredkimura**.
+            © 2026 StudyVault. All rights reserved. Created by Kimura Mutahi.
           </span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <a 
-            href="https://github.com/wilfredkimura/studyvault" 
-            target="_blank" 
+          <a
+            href="https://github.com/wilfredkimura/studyvault"
+            target="_blank"
             rel="noopener noreferrer"
-            style={{ 
-              color: 'var(--color-on-surface-variant)', 
-              textDecoration: 'none', 
-              fontSize: '13px', 
-              display: 'flex', 
-              alignItems: 'center', 
+            style={{
+              color: 'var(--color-on-surface-variant)',
+              textDecoration: 'none',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
               gap: '6px',
-              transition: 'color 0.2s' 
+              transition: 'color 0.2s'
             }}
-            onMouseEnter={e => e.currentTarget.style.color = '#fff'} 
+            onMouseEnter={e => e.currentTarget.style.color = '#fff'}
             onMouseLeave={e => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}
           >
             <GithubIcon size={14} />
