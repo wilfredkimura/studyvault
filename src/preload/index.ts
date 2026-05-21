@@ -24,6 +24,7 @@ export interface StudyVaultAPI {
   // Reading progress
   getProgress: (fileId: string) => Promise<any>;
   saveProgress: (progress: { file_id: string; last_page: number; scroll_position: number }) => Promise<any>;
+  getAllProgress: () => Promise<any[]>;
 
   // Conversion History
   getHistory: () => Promise<any[]>;
@@ -71,6 +72,7 @@ const api: StudyVaultAPI = {
   // Reading progress
   getProgress: (fileId) => ipcRenderer.invoke('db:get-progress', fileId),
   saveProgress: (progress) => ipcRenderer.invoke('db:save-progress', progress),
+  getAllProgress: () => ipcRenderer.invoke('db:get-all-progress'),
 
   // History
   getHistory: () => ipcRenderer.invoke('db:get-history'),

@@ -147,3 +147,38 @@ def test_update_document_name():
     assert fts_row is not None
     assert fts_row['name'] == 'New Name.pdf'
 
+
+def test_get_all_progress():
+    """Test that get_all_progress returns reading history joined with document info."""
+    # Insert two documents
+    doc1 = {
+        'id': 'doc-p1', 'name': 'Progress Doc 1.pdf', 'type': 'pdf',
+        'path': '/docs/p1.pdf', 'size': 100, 'hash': 'hash-p1',
+        'content_extracted': 'Progress doc 1 content.'
+    }
+    doc2 = {
+        'id': 'doc-p2', 'name': 'Progress Doc 2.pdf', 'type': 'pdf',
+        'path': '/docs/p2.pdf', 'size': 200, 'hash': 'hash-p2',
+        'content_extracted': 'Progress doc 2 content.'
+    }
+    db.add_document(doc1)
+    db.add_document(doc2)
+
+    # Save progress for both
+    db.save_progress({'file_id': 'doc-p1', 'last_page': 5, 'scroll_position': 100.0})
+    db.save_progress({'file_id': 'doc-p2', 'last_page': 12, 'scroll_position': 250.5})
+
+    # Query all progress
+    all_prog = db.get_all_progress()
+    assert len(all_prog) == 2
+
+    # Check file_ids
+    file_ids = [p['file_id'] for p in all_prog]
+    assert 'doc-p1' in file_ids
+    assert 'doc-p2' in file_ids
+
+    # Check joined columns
+    p1_row = next(p for p in all_prog if p['file_id'] == 'doc-p1')
+    assert p1_row['last_page'] == 5
+    assert p1_row['name'] == 'Progress Doc 1.pdf'
+    assert p1_row['type'] == 'pdf'

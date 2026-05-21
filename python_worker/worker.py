@@ -189,7 +189,7 @@ def process_ai_query(args):
     try:
         if provider == 'gemini':
             if not resolved_model:
-                resolved_model = 'gemini-1.5-flash'
+                resolved_model = 'gemini-2.5-flash'
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}]
             }
@@ -328,6 +328,8 @@ def main():
                 data = db.get_progress(args['file_id'])
             elif command == 'db_save_progress':
                 data = db.save_progress(args['progress'])
+            elif command == 'db_get_all_progress':
+                data = db.get_all_progress()
             elif command == 'db_get_history':
                 data = db.get_history()
             elif command == 'db_add_history':

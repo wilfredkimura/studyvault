@@ -79,6 +79,10 @@ export const dbService = {
     return pythonWorker.sendCommand('db_save_progress', { progress });
   },
 
+  getAllProgress: () => {
+    return pythonWorker.sendCommand('db_get_all_progress', {});
+  },
+
   getHistory: () => {
     return pythonWorker.sendCommand('db_get_history', {});
   },

@@ -44,6 +44,7 @@ declare global {
       deleteAnnotation: (id: string) => Promise<any>;
       getProgress: (fileId: string) => Promise<any>;
       saveProgress: (progress: { file_id: string; last_page: number; scroll_position: number }) => Promise<any>;
+      getAllProgress: () => Promise<any[]>;
       getHistory: () => Promise<any[]>;
       addHistory: (record: any) => Promise<any>;
       getAiCache: (hash: string) => Promise<any>;
@@ -96,6 +97,7 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<any | null>(null);
   const [annotations, setAnnotations] = useState<any[]>([]);
   const [activeProgress, setActiveProgress] = useState<{ last_page: number } | null>(null);
+  const [readingHistory, setReadingHistory] = useState<any[]>([]);
   const [isMaximized, setIsMaximized] = useState(false);
 
   // Check window maximize state initially and on resize
@@ -166,9 +168,11 @@ export default function App() {
         const docs = await window.api.getDocuments();
         const tgs = await window.api.getTags();
         const hist = await window.api.getHistory();
+        const allProg = await window.api.getAllProgress();
         setDocuments(docs);
         setTags(tgs);
         setHistory(hist);
+        setReadingHistory(allProg || []);
       } catch (err) {
         showNotification('Failed to read database records', 'error');
       }
@@ -177,6 +181,7 @@ export default function App() {
       setDocuments(mockDb.documents);
       setTags(mockDb.tags);
       setHistory(mockDb.history);
+      setReadingHistory([]);
     }
   };
 
@@ -488,10 +493,9 @@ export default function App() {
             <div 
               className={`nav-item ${activeTab === 'viewer' ? 'active' : ''}`}
               onClick={() => {
-                if (selectedFile) setActiveTab('viewer');
-                else showNotification('Select a document from Library to view', 'info');
+                // Always switch to viewer tab; if no file, show reading history
+                setActiveTab('viewer');
               }}
-              style={{ opacity: selectedFile ? 1 : 0.5 }}
             >
               <FileText size={18} />
               <span className="body-md">Reader</span>
@@ -573,17 +577,25 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'viewer' && selectedFile && (
-            <ViewerScreen 
-              file={selectedFile} 
-              annotations={annotations}
-              progress={activeProgress}
-              apiKey={apiKey}
-              provider={aiProvider}
-              onRefresh={async () => {
-                if (selectedFile) handleViewFile(selectedFile);
-              }}
-            />
+          {activeTab === 'viewer' && (
+            selectedFile ? (
+              <ViewerScreen 
+                file={selectedFile} 
+                annotations={annotations}
+                progress={activeProgress}
+                apiKey={apiKey}
+                provider={aiProvider}
+                onRefresh={async () => {
+                  if (selectedFile) handleViewFile(selectedFile);
+                }}
+              />
+            ) : (
+              <ReaderHistoryScreen
+                readingHistory={readingHistory}
+                documents={documents}
+                onViewFile={handleViewFile}
+              />
+            )
           )}
 
           {activeTab === 'convert' && (
@@ -763,14 +775,35 @@ function LibraryScreen({
   showNotification 
 }: any) {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  // Restore last selected folder from localStorage
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
+    try { return localStorage.getItem('studyvault_last_folder') ?? null; } catch { return null; }
+  });
   const [searchFilter, setSearchFilter] = useState('');
 
+  const persistFolder = (folder: string | null) => {
+    setSelectedFolder(folder);
+    try {
+      if (folder === null) localStorage.removeItem('studyvault_last_folder');
+      else localStorage.setItem('studyvault_last_folder', folder);
+    } catch {/* ignore */}
+  };
+
+  // 'Uncategorized' virtual folder = docs with no folder
+  const UNCATEGORIZED = '__UNCATEGORIZED__';
   const uniqueFolders = Array.from(new Set(documents.map((d: any) => d.folder_name).filter(Boolean))) as string[];
+  const hasUncategorized = documents.some((d: any) => !d.folder_name);
 
   const filteredDocs = documents.filter((doc: any) => {
     const matchesSearch = doc.name.toLowerCase().includes(searchFilter.toLowerCase());
-    const matchesFolder = selectedFolder ? doc.folder_name === selectedFolder : true;
+    let matchesFolder: boolean;
+    if (selectedFolder === UNCATEGORIZED) {
+      matchesFolder = !doc.folder_name;
+    } else if (selectedFolder) {
+      matchesFolder = doc.folder_name === selectedFolder;
+    } else {
+      matchesFolder = true;
+    }
     
     if (selectedTag) {
       const docMappedTags = mockDb.fileTags.filter(ft => ft.tag_id === selectedTag).map(ft => ft.file_id);
@@ -806,7 +839,7 @@ function LibraryScreen({
             <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)', marginBottom: '8px' }}>Folders</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div 
-                onClick={() => setSelectedFolder(null)}
+                onClick={() => persistFolder(null)}
                 style={{ 
                   padding: '6px 12px', 
                   borderRadius: 'var(--rounded-default)', 
@@ -824,12 +857,33 @@ function LibraryScreen({
                   {documents.length}
                 </span>
               </div>
+              {hasUncategorized && (
+                <div 
+                  onClick={() => persistFolder(UNCATEGORIZED)}
+                  style={{ 
+                    padding: '6px 12px', 
+                    borderRadius: 'var(--rounded-default)', 
+                    cursor: 'pointer',
+                    backgroundColor: selectedFolder === UNCATEGORIZED ? 'var(--color-surface-container-high)' : 'transparent',
+                    fontWeight: selectedFolder === UNCATEGORIZED ? '600' : 'normal',
+                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <span>📂 Uncategorized</span>
+                  <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>
+                    {documents.filter((d: any) => !d.folder_name).length}
+                  </span>
+                </div>
+              )}
               {uniqueFolders.map((folder: string) => {
                 const folderCount = documents.filter((d: any) => d.folder_name === folder).length;
                 return (
                   <div 
                     key={folder}
-                    onClick={() => setSelectedFolder(folder)}
+                    onClick={() => persistFolder(folder)}
                     style={{ 
                       padding: '6px 12px', 
                       borderRadius: 'var(--rounded-default)', 
@@ -856,7 +910,7 @@ function LibraryScreen({
                                 await onUpdateFolder(doc.id, null);
                               }
                             }
-                            if (selectedFolder === folder) setSelectedFolder(null);
+                            if (selectedFolder === folder) persistFolder(null);
                           } catch (err: any) {
                             showNotification(`Failed to clear folder grouping: ${err.message}`, 'error');
                           }
@@ -1136,7 +1190,7 @@ function PageTextSheet({ pageNum, text, zoom, annotations, onMouseUp }: { pageNu
                 borderBottom: `2px solid ${color}`,
                 cursor: 'pointer'
               }}
-              title={matchedAnno.type === 'note' ? matchedAnno.content : undefined}
+              title={matchedAnno.type === 'note' ? (matchedAnno.rect || matchedAnno.content) : undefined}
             >
               {part}
             </mark>
@@ -1309,7 +1363,7 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
   const [copilotResponses, setCopilotResponses] = useState<{ q: string; a: string }[]>([]);
   const [loadingAi, setLoadingAi] = useState(false);
 
-  // Dual view states
+  // Dual view states - default to layout (image) view
   const [viewerMode, setViewerMode] = useState<'layout' | 'reader'>('layout');
   const [zoom, setZoom] = useState(1.0);
   const [pageCount, setPageCount] = useState(0);
@@ -1421,18 +1475,23 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
     const textToAnnotate = selectedText || "Selected section";
     if (!textToAnnotate) return;
 
-    const annotationContent = type === 'note' ? (prompt('Enter annotation comment:') || '') : '';
+    // For both types, content = the selected document text (for highlight matching)
+    // For notes, rect stores the user's comment
+    let noteComment = '';
+    if (type === 'note') {
+      noteComment = prompt('Enter annotation comment:') || '';
+    }
     
     if (window.api) {
       await window.api.addAnnotation({
         id: Math.random().toString(36).substring(2, 9),
         file_id: file.id,
         page: selectedTextPage,
-        rect: null,
+        rect: type === 'note' ? noteComment : null,
         start_offset: 0,
         end_offset: textToAnnotate.length,
         type,
-        content: type === 'note' ? annotationContent : textToAnnotate
+        content: textToAnnotate  // always the selected text, used for highlight matching
       });
       onRefresh();
     } else {
@@ -1440,11 +1499,11 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
         id: Math.random().toString(36).substring(2, 9),
         file_id: file.id,
         page: selectedTextPage,
-        rect: null,
+        rect: type === 'note' ? noteComment : null,
         start_offset: 0,
         end_offset: textToAnnotate.length,
         type,
-        content: type === 'note' ? annotationContent : textToAnnotate,
+        content: textToAnnotate,
         created_at: new Date().toISOString()
       });
       onRefresh();
@@ -1735,7 +1794,11 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
                       </button>
                     </div>
                     <p style={{ fontSize: '13px', fontStyle: anno.type === 'highlight' ? 'italic' : 'normal' }}>
-                      {anno.content || "(Highlight)"}
+                      {anno.type === 'note' ? (
+                        <><em style={{ color: 'var(--color-on-surface-variant)' }}>"...{anno.content}..."</em><br /><span style={{ color: 'var(--color-secondary)' }}>Note: {anno.rect || '(no comment)'}</span></>
+                      ) : (
+                        anno.content || "(Highlight)"
+                      )}
                     </p>
                   </div>
                 ))}
@@ -1796,20 +1859,138 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
 }
 
 // ----------------------------------------------------
+// 3b. READER HISTORY SCREEN (no file selected)
+// ----------------------------------------------------
+function ReaderHistoryScreen({ readingHistory, documents, onViewFile }: any) {
+  const getDoc = (fileId: string) => documents.find((d: any) => d.id === fileId);
+
+  return (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h1 className="headline-lg">Reading History</h1>
+        <p className="body-md" style={{ color: 'var(--color-on-surface-variant)' }}>
+          Resume where you left off — your recently read documents and saved page positions.
+        </p>
+      </div>
+
+      {readingHistory.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, overflowY: 'auto' }}>
+          {readingHistory.map((entry: any) => {
+            const doc = getDoc(entry.file_id);
+            if (!doc) return null;
+            return (
+              <div
+                key={entry.file_id}
+                className="glass-panel hover-card-btn"
+                onClick={() => onViewFile(doc)}
+                style={{
+                  padding: 'var(--spacing-lg)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--spacing-lg)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {/* File type badge */}
+                <div style={{
+                  width: '48px', height: '48px',
+                  borderRadius: 'var(--rounded-md)',
+                  backgroundColor: 'var(--color-primary-container)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0
+                }}>
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--color-primary)', letterSpacing: '0.05em' }}>
+                    {(entry.type || doc.type || '?').toUpperCase()}
+                  </span>
+                </div>
+
+                {/* File info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="body-md" style={{ fontWeight: '600', color: 'var(--color-on-surface)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {entry.name || doc.name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-outline)', marginTop: '4px' }}>
+                    {entry.path || doc.path}
+                  </div>
+                </div>
+
+                {/* Progress info */}
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: '13px', color: 'var(--color-primary)', fontWeight: '600' }}>
+                    Page {entry.last_page}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--color-outline)', marginTop: '2px' }}>
+                    {entry.updated_at ? entry.updated_at.split(' ')[0] : 'Recently'}
+                  </div>
+                </div>
+
+                {/* Resume arrow */}
+                <div style={{
+                  padding: '8px 16px',
+                  borderRadius: 'var(--rounded-default)',
+                  backgroundColor: 'var(--color-primary)',
+                  color: 'var(--color-on-primary)',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  flexShrink: 0
+                }}>
+                  Resume
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="glass-panel" style={{ padding: 'var(--spacing-xl)', textAlign: 'center', color: 'var(--color-outline)' }}>
+          <FileText size={40} style={{ margin: '0 auto 12px', color: 'var(--color-outline)' }} />
+          <div className="headline-sm" style={{ marginBottom: '8px' }}>No reading history yet</div>
+          <p className="body-sm">Open a document from the Library to start reading. Your progress will be saved automatically.</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ----------------------------------------------------
 // 4. CONVERSION SCREEN
 // ----------------------------------------------------
 function ConversionScreen({ documents, history, showNotification, onRefresh, onViewFile }: any) {
   const [selectedFileId, setSelectedFileId] = useState('');
   const [targetFormat, setTargetFormat] = useState('pdf');
   const [converting, setConverting] = useState(false);
+  // External file (browsed from outside the library)
+  const [externalFile, setExternalFile] = useState<{ path: string; name: string; type: string; size: number } | null>(null);
+
+  const handleBrowseExternalFile = async () => {
+    if (window.api) {
+      try {
+        const file = await window.api.openFileDialog();
+        if (file) {
+          setExternalFile(file);
+          setSelectedFileId(''); // clear library selection
+          showNotification(`Selected external file: ${file.name}`, 'info');
+        }
+      } catch (err: any) {
+        showNotification(`Failed to browse file: ${err.message}`, 'error');
+      }
+    } else {
+      showNotification('File browse only available in Electron app', 'info');
+    }
+  };
 
   const handleConvert = async () => {
-    if (!selectedFileId) {
-      showNotification('Please select a file to convert', 'error');
+    // Resolve source file: either from library or external file
+    let file: any = null;
+    if (externalFile) {
+      file = { id: null, name: externalFile.name, type: externalFile.type, path: externalFile.path, size: externalFile.size };
+    } else if (selectedFileId) {
+      file = documents.find((d: any) => d.id === selectedFileId);
+    }
+    if (!file) {
+      showNotification('Please select a file to convert (from library or browse externally)', 'error');
       return;
     }
-    const file = documents.find((d: any) => d.id === selectedFileId);
-    if (!file) return;
 
     setConverting(true);
     showNotification(`Starting conversion of ${file.name} to ${targetFormat.toUpperCase()}`, 'info');
@@ -1902,9 +2083,36 @@ function ConversionScreen({ documents, history, showNotification, onRefresh, onV
 
           <div>
             <label className="label-md" style={{ display: 'block', marginBottom: '8px' }}>Select Input File</label>
+            {/* External File Browse */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+              <button
+                onClick={handleBrowseExternalFile}
+                className="btn btn-secondary"
+                style={{ fontSize: '12px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <FolderOpen size={14} />
+                <span>Browse External File...</span>
+              </button>
+              {externalFile && (
+                <div style={{
+                  flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '6px 10px',
+                  background: 'var(--color-primary-container)',
+                  borderRadius: 'var(--rounded-default)',
+                  fontSize: '12px'
+                }}>
+                  <span style={{ color: 'var(--color-primary)', fontWeight: '600' }}>{externalFile.name}</span>
+                  <button
+                    onClick={() => setExternalFile(null)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-outline)', fontSize: '11px', marginLeft: 'auto' }}
+                  >✕</button>
+                </div>
+              )}
+            </div>
+            <label className="label-md" style={{ display: 'block', marginBottom: '4px', fontSize: '11px', color: 'var(--color-outline)' }}>Or choose from library:</label>
             <select 
               value={selectedFileId} 
-              onChange={(e) => setSelectedFileId(e.target.value)}
+              onChange={(e) => { setSelectedFileId(e.target.value); if (e.target.value) setExternalFile(null); }}
               style={{
                 width: '100%',
                 background: 'var(--color-surface-container)',
@@ -1916,7 +2124,7 @@ function ConversionScreen({ documents, history, showNotification, onRefresh, onV
                 fontFamily: 'var(--font-family-body)'
               }}
             >
-              <option value="">-- Choose file --</option>
+              <option value="">-- Choose from library --</option>
               {documents.map((d: any) => (
                 <option key={d.id} value={d.id}>{d.name} ({d.type.toUpperCase()})</option>
               ))}
@@ -1978,61 +2186,69 @@ function ConversionScreen({ documents, history, showNotification, onRefresh, onV
                   <div style={{ fontSize: '13px' }}>
                     <strong>Source:</strong> {hist.source_name}
                   </div>
-                  <div style={{ fontSize: '13px', marginTop: '2px', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <strong>Output:</strong>
-                    {outputDoc ? (
-                      <>
-                        <span 
-                          onClick={() => onViewFile(outputDoc)}
-                          style={{ 
-                            cursor: 'pointer', 
-                            textDecoration: 'underline', 
-                            color: 'var(--color-primary)',
-                            marginLeft: '4px',
-                            fontWeight: '600'
-                          }}
-                          title="Click to view in Reader"
-                        >
-                          {outputDoc.name}
-                        </span>
-                        <button 
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            const newName = prompt('Enter new filename:', outputDoc.name);
-                            if (newName && newName.trim() && newName.trim() !== outputDoc.name) {
-                              try {
-                                if (window.api) {
-                                  await window.api.updateDocumentName(outputDoc.id, newName.trim());
-                                } else {
-                                  const docToRename = mockDb.documents.find(d => d.id === outputDoc.id);
-                                  if (docToRename) docToRename.name = newName.trim();
-                                  const histToRename = mockDb.history.find(h => h.id === hist.id);
-                                  if (histToRename) histToRename.output_name = newName.trim();
+                  <div style={{ fontSize: '13px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <strong>Output:</strong>
+                      {outputDoc ? (
+                        <>
+                          <span 
+                            onClick={() => onViewFile(outputDoc)}
+                            style={{ 
+                              cursor: 'pointer', 
+                              textDecoration: 'underline', 
+                              color: 'var(--color-primary)',
+                              marginLeft: '4px',
+                              fontWeight: '600'
+                            }}
+                            title="Click to view in Reader"
+                          >
+                            {outputDoc.name}
+                          </span>
+                          <button 
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const newName = prompt('Enter new filename:', outputDoc.name);
+                              if (newName && newName.trim() && newName.trim() !== outputDoc.name) {
+                                try {
+                                  if (window.api) {
+                                    await window.api.updateDocumentName(outputDoc.id, newName.trim());
+                                  } else {
+                                    const docToRename = mockDb.documents.find(d => d.id === outputDoc.id);
+                                    if (docToRename) docToRename.name = newName.trim();
+                                    const histToRename = mockDb.history.find(h => h.id === hist.id);
+                                    if (histToRename) histToRename.output_name = newName.trim();
+                                  }
+                                  showNotification('File renamed successfully', 'success');
+                                  onRefresh();
+                                } catch (err: any) {
+                                  showNotification(`Rename failed: ${err.message}`, 'error');
                                 }
-                                showNotification('File renamed successfully', 'success');
-                                onRefresh();
-                              } catch (err: any) {
-                                showNotification(`Rename failed: ${err.message}`, 'error');
                               }
-                            }
-                          }}
-                          style={{
-                            marginLeft: '12px',
-                            background: 'var(--color-surface-container-highest)',
-                            border: '1px solid var(--color-outline-variant)',
-                            borderRadius: 'var(--rounded-sm)',
-                            padding: '2px 6px',
-                            fontSize: '10px',
-                            color: 'var(--color-on-surface-variant)',
-                            cursor: 'pointer',
-                            fontFamily: 'var(--font-family-body)'
-                          }}
-                        >
-                          ✏️ Rename
-                        </button>
-                      </>
-                    ) : (
-                      <span style={{ marginLeft: '4px' }}>{hist.output_name || 'Processed successfully'}</span>
+                            }}
+                            style={{
+                              marginLeft: '12px',
+                              background: 'var(--color-surface-container-highest)',
+                              border: '1px solid var(--color-outline-variant)',
+                              borderRadius: 'var(--rounded-sm)',
+                              padding: '2px 6px',
+                              fontSize: '10px',
+                              color: 'var(--color-on-surface-variant)',
+                              cursor: 'pointer',
+                              fontFamily: 'var(--font-family-body)'
+                            }}
+                          >
+                            ✏️ Rename
+                          </button>
+                        </>
+                      ) : (
+                        <span style={{ marginLeft: '4px' }}>{hist.output_name || 'Processed successfully'}</span>
+                      )}
+                    </div>
+                    {/* Show output path */}
+                    {(outputDoc?.path || hist.output_path) && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-outline)', marginTop: '2px', wordBreak: 'break-all' }}>
+                        📂 {outputDoc?.path || hist.output_path}
+                      </div>
                     )}
                   </div>
                 </div>

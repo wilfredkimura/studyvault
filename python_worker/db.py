@@ -321,6 +321,20 @@ def save_progress(progress):
     conn.commit()
     return True
 
+def get_all_progress():
+    """Return reading progress for all files, joined with document metadata, sorted by most recently read."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT rp.file_id, rp.last_page, rp.scroll_position, rp.updated_at,
+               d.name, d.type, d.path, d.size
+        FROM reading_progress rp
+        JOIN documents d ON d.id = rp.file_id
+        ORDER BY rp.updated_at DESC
+    """)
+    return cur.fetchall()
+
+
 def get_history():
     conn = get_conn()
     cur = conn.cursor()

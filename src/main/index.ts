@@ -76,6 +76,7 @@ ipcMain.handle('db:delete-annotation', async (_, id) => dbService.deleteAnnotati
 
 ipcMain.handle('db:get-progress', async (_, fileId) => dbService.getProgress(fileId));
 ipcMain.handle('db:save-progress', async (_, progress) => dbService.saveProgress(progress));
+ipcMain.handle('db:get-all-progress', async () => dbService.getAllProgress());
 
 ipcMain.handle('db:get-history', async () => dbService.getHistory());
 ipcMain.handle('db:add-history', async (_, record) => dbService.addHistoryRecord(record));

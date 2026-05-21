@@ -48,4 +48,9 @@ describe('Database Service Delegation', () => {
     await dbService.deleteAnnotation('a1');
     expect(pythonWorker.sendCommand).toHaveBeenCalledWith('db_delete_annotation', { id: 'a1' });
   });
+
+  it('should delegate getAllProgress to pythonWorker', async () => {
+    await dbService.getAllProgress();
+    expect(pythonWorker.sendCommand).toHaveBeenCalledWith('db_get_all_progress', {});
+  });
 });
