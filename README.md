@@ -90,32 +90,6 @@ The output builds will compile and save in the `release/` folder.
 
 ---
 
-## 🌐 Marketing Website Setup & Deployment
-
-The StudyVault website acts as both a tutorial and a direct download node for your GitHub releases.
-
-### Development Server
-You can run the website locally from the root folder without switching directories:
-```bash
-npm run website:dev
-```
-Open `http://localhost:5173` in your browser.
-
-### Build and Package
-To compile production assets (HTML, CSS, JS) into `website/dist/`:
-```bash
-npm run website:build
-```
-
-### Vercel Deployment
-The repository is pre-configured with a root-level `vercel.json` file for zero-config Vercel deployment. To deploy:
-1. Push your monorepo code to GitHub.
-2. Import the repository into the **Vercel Dashboard**.
-3. Keep the **Root Directory** as `./` (do not change to `website/`).
-4. Vercel will automatically read `vercel.json`, run `npm run website:build`, and host the site from `website/dist`.
-
----
-
 ## 📄 License
 
 This project is licensed under the MIT License. See the [LICENSE](file:///c:/Users/kimushzyyy/Documents/studyvault/LICENSE) file for more information.
