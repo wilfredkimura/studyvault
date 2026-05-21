@@ -1,0 +1,6 @@
+/* App.css is intentionally kept simple to let index.css manage the main theme. */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}

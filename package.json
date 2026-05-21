@@ -11,7 +11,9 @@
     "start": "tsc -p tsconfig.main.json && electron .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "website:dev": "npm run dev --prefix website",
+    "website:build": "npm run build --prefix website"
   },
   "build": {
     "appId": "com.studyvault.app",
