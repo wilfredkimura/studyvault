@@ -97,6 +97,7 @@ export default function App() {
   // Settings BYOK state
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('studyvault_apikey') || '');
   const [aiProvider, setAiProvider] = useState(() => localStorage.getItem('studyvault_provider') || 'openai');
+  const [isImporting, setIsImporting] = useState(false);
 
   // Load Initial Data
   useEffect(() => {
@@ -134,16 +135,16 @@ export default function App() {
       try {
         const file = await window.api.openFileDialog();
         if (file) {
-          // Check duplicates via hash (simple sha256 simulation in main, we compute random hash here)
-          const fileHash = 'hash_' + Math.random().toString(36).substring(2, 9);
+          setIsImporting(true);
+          showNotification(`Importing and indexing ${file.name}. Please wait...`, 'info');
           const newDoc = {
             id: Math.random().toString(36).substring(2, 9),
             name: file.name,
             type: file.type,
             path: file.path,
             size: file.size,
-            hash: fileHash,
-            content_extracted: `Full text contents extracted from imported document: ${file.name}`
+            hash: '',
+            content_extracted: ''
           };
           await window.api.addDocument(newDoc);
           showNotification(`Imported ${file.name} successfully`, 'success');
@@ -151,6 +152,8 @@ export default function App() {
         }
       } catch (err: any) {
         showNotification(`Import failed: ${err.message}`, 'error');
+      } finally {
+        setIsImporting(false);
       }
     } else {
       // Web simulator fallback
@@ -382,6 +385,7 @@ export default function App() {
               onViewFile={handleViewFile}
               onDelete={handleDeleteDoc}
               onImport={handleImportFile}
+              isImporting={isImporting}
             />
           )}
 
@@ -562,7 +566,7 @@ function DashboardScreen({ documents, history, onViewFile, onNavigate }: any) {
 // ----------------------------------------------------
 // 2. LIBRARY SCREEN
 // ----------------------------------------------------
-function LibraryScreen({ documents, tags, onViewFile, onDelete, onImport }: any) {
+function LibraryScreen({ documents, tags, onViewFile, onDelete, onImport, isImporting }: any) {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState('');
 
@@ -583,9 +587,9 @@ function LibraryScreen({ documents, tags, onViewFile, onDelete, onImport }: any)
           <h1 className="headline-lg">StudyVault Library</h1>
           <p className="body-md" style={{ color: 'var(--color-on-surface-variant)' }}>Manage and explore all your academic resources offline.</p>
         </div>
-        <button onClick={onImport} className="btn btn-primary">
-          <Plus size={16} />
-          <span>Add Document</span>
+        <button onClick={onImport} className="btn btn-primary" disabled={isImporting}>
+          {isImporting ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
+          <span>{isImporting ? 'Importing...' : 'Add Document'}</span>
         </button>
       </div>
 

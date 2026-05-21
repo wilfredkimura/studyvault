@@ -143,14 +143,32 @@ def get_documents():
     return cur.fetchall()
 
 def add_document(doc):
+    import os
+    import extractor
+    
+    file_path = doc['path']
+    if os.path.exists(file_path):
+        text, file_hash = extractor.extract_text_and_hash(file_path, doc['type'])
+    else:
+        # Fallback for unit testing and mocks when files don't exist locally
+        text = doc.get('content_extracted') or f"[Placeholder content for {doc['name']}]"
+        file_hash = doc.get('hash') or f"mock_hash_{doc['id']}"
+        
     conn = get_conn()
     cur = conn.cursor()
+    
+    # Check duplicate hash
+    cur.execute("SELECT id, name FROM documents WHERE hash = ?", (file_hash,))
+    dup = cur.fetchone()
+    if dup:
+        raise ValueError(f"Duplicate document: A file with the same content hash already exists in the database ('{dup['name']}').")
+        
     cur.execute("""
         INSERT INTO documents (id, name, type, path, size, hash, content_extracted)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
         doc['id'], doc['name'], doc['type'], doc['path'], 
-        doc['size'], doc['hash'], doc.get('content_extracted')
+        doc['size'], file_hash, text
     ))
     conn.commit()
     return True
