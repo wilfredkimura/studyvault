@@ -85,6 +85,31 @@ ipcMain.handle('db:get-ai-cache', async (_, hash) => dbService.getAiCache(hash))
 ipcMain.handle('db:save-ai-cache', async (_, cache) => dbService.saveAiCache(cache));
 ipcMain.handle('db:update-document-name', async (_, id, name) => dbService.updateDocumentName(id, name));
 
+ipcMain.handle('db:get-ai-chats', async (_, fileId) => dbService.getAiChats(fileId));
+ipcMain.handle('db:create-ai-chat', async (_, chatId, title, fileId) => dbService.createAiChat(chatId, title, fileId));
+ipcMain.handle('db:delete-ai-chat', async (_, chatId) => dbService.deleteAiChat(chatId));
+ipcMain.handle('db:get-ai-messages', async (_, chatId) => dbService.getAiMessages(chatId));
+ipcMain.handle('db:add-ai-message', async (_, msg) => dbService.addAiMessage(msg));
+
+// File Export/Sharing Handler
+ipcMain.handle('files:share-export', async (_, filePaths: string[], destDir: string) => {
+  try {
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    for (const filePath of filePaths) {
+      if (fs.existsSync(filePath)) {
+        const destPath = path.join(destDir, path.basename(filePath));
+        fs.copyFileSync(filePath, destPath);
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to export files:', err);
+    throw err;
+  }
+});
+
 // Setup IPC Python worker handler
 ipcMain.handle('worker:run-command', async (_, command, args) => {
   return pythonWorker.sendCommand(command, args);

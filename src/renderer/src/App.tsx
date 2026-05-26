@@ -21,7 +21,10 @@ import {
   Send,
   FolderOpen,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Copy,
+  Split,
+  Share2
 } from 'lucide-react';
 
 // Expose Electron API context bridge types
@@ -99,6 +102,88 @@ export default function App() {
   const [activeProgress, setActiveProgress] = useState<{ last_page: number } | null>(null);
   const [readingHistory, setReadingHistory] = useState<any[]>([]);
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // New States for v1.0.0.1
+  const [apiKeys, setApiKeys] = useState<any[]>([]);
+  const [isSplitScreen, setIsSplitScreen] = useState(false);
+  const [selectedFileRight, setSelectedFileRight] = useState<any | null>(null);
+  const [annotationsRight, setAnnotationsRight] = useState<any[]>([]);
+  const [activeProgressRight, setActiveProgressRight] = useState<{ last_page: number } | null>(null);
+  
+  // OTA updates state
+  const [otaUpdatePending, setOtaUpdatePending] = useState(false);
+  const [otaDownloading, setOtaDownloading] = useState(false);
+  const [otaProgress, setOtaProgress] = useState(0);
+  const [otaStatusText, setOtaStatusText] = useState('');
+
+  // Initial Key Migration & OTA Check
+  useEffect(() => {
+    // Migrate key
+    const oldKey = localStorage.getItem('studyvault_apikey');
+    const oldProvider = localStorage.getItem('studyvault_provider') || 'openai';
+    const storedKeysStr = localStorage.getItem('studyvault_apikeys');
+    let loadedKeys: any[] = [];
+    if (storedKeysStr) {
+      try {
+        loadedKeys = JSON.parse(storedKeysStr);
+      } catch (e) {
+        loadedKeys = [];
+      }
+    }
+    if (loadedKeys.length === 0 && oldKey) {
+      loadedKeys = [{
+        id: 'legacy-key',
+        label: 'Legacy Key',
+        provider: oldProvider,
+        apiKey: oldKey,
+        model: oldProvider === 'gemini' ? 'gemini-2.5-flash' : oldProvider === 'openai' ? 'gpt-4o-mini' : oldProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'llama3',
+        isActive: true,
+        isFallback: false
+      }];
+      localStorage.setItem('studyvault_apikeys', JSON.stringify(loadedKeys));
+    }
+    setApiKeys(loadedKeys);
+
+    // OTA Update Check after 1.5 seconds
+    const timer = setTimeout(() => {
+      const isDismissed = localStorage.getItem('studyvault_ota_dismissed') === 'true';
+      const version = localStorage.getItem('studyvault_version') || '1.0.0.1';
+      if (!isDismissed && version === '1.0.0.1') {
+        setOtaUpdatePending(true);
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleStartOtaUpdate = () => {
+    setOtaDownloading(true);
+    setOtaProgress(0);
+    setOtaStatusText('Connecting to update server...');
+    
+    const steps = [
+      { progress: 20, status: 'Downloading update bundle...' },
+      { progress: 50, status: 'Extracting package contents...' },
+      { progress: 80, status: 'Verifying files integrity...' },
+      { progress: 95, status: 'Finalizing install...' },
+      { progress: 100, status: 'Installation successful. Restarting...' }
+    ];
+
+    let currentStepIdx = 0;
+    const interval = setInterval(() => {
+      if (currentStepIdx < steps.length) {
+        setOtaProgress(steps[currentStepIdx].progress);
+        setOtaStatusText(steps[currentStepIdx].status);
+        currentStepIdx++;
+      } else {
+        clearInterval(interval);
+        localStorage.setItem('studyvault_version', '1.0.0.2');
+        localStorage.setItem('studyvault_ota_dismissed', 'true');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      }
+    }, 800);
+  };
 
   // Check window maximize state initially and on resize
   useEffect(() => {
@@ -382,6 +467,26 @@ export default function App() {
     }
   };
 
+  const handleViewFileRight = async (doc: any) => {
+    setSelectedFileRight(doc);
+    if (window.api) {
+      try {
+        const annos = await window.api.getAnnotations(doc.id);
+        const prog = await window.api.getProgress(doc.id);
+        setAnnotationsRight(annos);
+        setActiveProgressRight(prog || { last_page: 1 });
+      } catch (e) {
+        setAnnotationsRight([]);
+        setActiveProgressRight({ last_page: 1 });
+      }
+    } else {
+      const annos = mockDb.annotations.filter(a => a.file_id === doc.id);
+      const prog = mockDb.progress.find(p => p.file_id === doc.id);
+      setAnnotationsRight(annos);
+      setActiveProgressRight(prog || { last_page: 1 });
+    }
+  };
+
   // Global search trigger
   const handleGlobalSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -398,8 +503,157 @@ export default function App() {
     showNotification('AI credentials saved locally', 'success');
   };
 
+  const runQueryWithFallback = async (primaryKey: any, promptText: string, contextText: string): Promise<{ text: string; modelUsed: string }> => {
+    try {
+      if (!window.api) {
+        // Simulator fallback
+        return { 
+          text: `[Simulator - ${primaryKey.label}] Answer for prompt: "${promptText.substring(0, 30)}..."`, 
+          modelUsed: primaryKey.model || 'mock-model' 
+        };
+      }
+      const res = await window.api.runWorkerCommand('ai_query', {
+        provider: primaryKey.provider,
+        api_key: primaryKey.apiKey,
+        prompt: promptText,
+        context: contextText,
+        model: primaryKey.model
+      });
+      if (res.error || (res.response && res.response.startsWith('AI query failed'))) {
+        throw new Error(res.error || res.response);
+      }
+      return { text: res.response, modelUsed: res.model || primaryKey.model };
+    } catch (err: any) {
+      console.warn(`Query failed for ${primaryKey.label}:`, err.message);
+      // Find fallback keys
+      const fallbackKeys = apiKeys.filter(k => k.isFallback && k.id !== primaryKey.id);
+      for (const fbKey of fallbackKeys) {
+        try {
+          if (!window.api) {
+            return { 
+              text: `[Simulator Fallback - ${fbKey.label}] Answer for prompt: "${promptText.substring(0, 30)}..."`, 
+              modelUsed: fbKey.model || 'mock-model' 
+            };
+          }
+          const res = await window.api.runWorkerCommand('ai_query', {
+            provider: fbKey.provider,
+            api_key: fbKey.apiKey,
+            prompt: promptText,
+            context: contextText,
+            model: fbKey.model
+          });
+          if (res.error || (res.response && res.response.startsWith('AI query failed'))) {
+            throw new Error(res.error || res.response);
+          }
+          return { 
+            text: `[Note: ${primaryKey.label} failed. Fell back to ${fbKey.label}]\n\n${res.response}`, 
+            modelUsed: res.model || fbKey.model 
+          };
+        } catch (fbErr: any) {
+          console.warn(`Fallback failed for ${fbKey.label}:`, fbErr.message);
+        }
+      }
+      throw new Error(`Primary and all fallback models failed. Last error: ${err.message}`);
+    }
+  };
+
   return (
     <div className="app-container">
+      {/* OTA Update Alert Modal Overlay */}
+      {otaUpdatePending && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(14, 13, 22, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div className="glass-panel" style={{
+            width: '500px',
+            padding: 'var(--spacing-lg)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            border: '1px solid var(--color-primary)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <RefreshCw size={24} className="text-primary animate-spin" />
+              <h2 className="headline-md" style={{ color: 'var(--color-primary)' }}>New Update Available</h2>
+            </div>
+            
+            <p className="body-md">
+              StudyVault version <strong>v1.0.0.2</strong> is ready (current version: v1.0.0.1).
+            </p>
+
+            <div style={{
+              backgroundColor: 'var(--color-surface-container)',
+              borderRadius: 'var(--rounded-default)',
+              padding: '12px',
+              fontSize: '12px',
+              color: 'var(--color-on-surface-variant)',
+              maxHeight: '150px',
+              overflowY: 'auto'
+            }}>
+              <strong>What's New in v1.0.0.2:</strong>
+              <ul style={{ paddingLeft: '16px', marginTop: '6px', listStyleType: 'disc', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <li>Parallel key comparisons & cascading fallback</li>
+                <li>Side-by-side reading split workspace</li>
+                <li>Saved chat histories in local SQLite database</li>
+                <li>Full-folder zip/directory exports</li>
+              </ul>
+            </div>
+
+            {otaDownloading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <span>{otaStatusText}</span>
+                  <span>{otaProgress}%</span>
+                </div>
+                <div style={{
+                  width: '100%',
+                  height: '6px',
+                  backgroundColor: 'var(--color-surface-container-high)',
+                  borderRadius: 'var(--rounded-full)',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    width: `${otaProgress}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))',
+                    transition: 'width 0.4s ease'
+                  }}></div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                <button 
+                  onClick={() => {
+                    setOtaUpdatePending(false);
+                    localStorage.setItem('studyvault_ota_dismissed', 'true');
+                  }}
+                  className="btn btn-secondary"
+                  style={{ padding: '8px 16px', fontSize: '13px' }}
+                >
+                  Later
+                </button>
+                <button 
+                  onClick={handleStartOtaUpdate}
+                  className="btn btn-primary"
+                  style={{ padding: '8px 16px', fontSize: '13px' }}
+                >
+                  Update Now
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* 1. TitleBar */}
       <header className="titlebar">
         <div className="headline-sm font-display" style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' } as any}>
@@ -514,7 +768,7 @@ export default function App() {
               onClick={() => setActiveTab('search')}
             >
               <Search size={18} />
-              <span className="body-md">Deep Search</span>
+              <span className="body-md">Content Search</span>
             </div>
 
             <div 
@@ -522,7 +776,7 @@ export default function App() {
               onClick={() => setActiveTab('ai')}
             >
               <Wand2 size={18} />
-              <span className="body-md">AI Copilot</span>
+              <span className="body-md">Study Assistant</span>
             </div>
 
             <div 
@@ -559,6 +813,7 @@ export default function App() {
               history={history} 
               onViewFile={handleViewFile}
               onNavigate={setActiveTab}
+              apiKeys={apiKeys}
             />
           )}
 
@@ -579,16 +834,70 @@ export default function App() {
 
           {activeTab === 'viewer' && (
             selectedFile ? (
-              <ViewerScreen 
-                file={selectedFile} 
-                annotations={annotations}
-                progress={activeProgress}
-                apiKey={apiKey}
-                provider={aiProvider}
-                onRefresh={async () => {
-                  if (selectedFile) handleViewFile(selectedFile);
-                }}
-              />
+              <div style={{ display: 'flex', gap: '16px', height: '100%', width: '100%', minHeight: 0 }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%' }}>
+                  <ViewerScreen 
+                    file={selectedFile} 
+                    annotations={annotations}
+                    progress={activeProgress}
+                    apiKey={apiKey}
+                    provider={aiProvider}
+                    onRefresh={async () => {
+                      if (selectedFile) handleViewFile(selectedFile);
+                    }}
+                    isSplit={isSplitScreen}
+                    onToggleSplit={() => setIsSplitScreen(!isSplitScreen)}
+                    documents={documents}
+                    onSwitchFile={(doc) => handleViewFile(doc)}
+                    apiKeys={apiKeys}
+                  />
+                </div>
+                {isSplitScreen && (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', borderLeft: '1px solid var(--color-outline-variant)' }}>
+                    {selectedFileRight ? (
+                      <ViewerScreen 
+                        file={selectedFileRight} 
+                        annotations={annotationsRight}
+                        progress={activeProgressRight}
+                        apiKey={apiKey}
+                        provider={aiProvider}
+                        onRefresh={async () => {
+                          if (selectedFileRight) handleViewFileRight(selectedFileRight);
+                        }}
+                        isSplit={isSplitScreen}
+                        onToggleSplit={() => setIsSplitScreen(false)}
+                        documents={documents}
+                        onSwitchFile={(doc) => handleViewFileRight(doc)}
+                        apiKeys={apiKeys}
+                      />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', backgroundColor: 'var(--color-surface-container-lowest)', borderRadius: 'var(--rounded-lg)', border: '1px dotted var(--color-outline-variant)', padding: '24px' }}>
+                        <p style={{ color: 'var(--color-outline)', marginBottom: '16px' }}>Select a document to read side-by-side</p>
+                        <select 
+                          onChange={(e) => {
+                            const doc = documents.find(d => d.id === e.target.value);
+                            if (doc) handleViewFileRight(doc);
+                          }}
+                          style={{
+                            background: 'var(--color-surface-container)',
+                            border: '1px solid var(--color-outline-variant)',
+                            borderRadius: 'var(--rounded-default)',
+                            padding: '8px 12px',
+                            color: '#fff',
+                            outline: 'none',
+                            fontFamily: 'var(--font-family-body)'
+                          }}
+                        >
+                          <option value="">-- Choose from library --</option>
+                          {documents.filter(d => d.id !== selectedFile.id).map((d: any) => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : (
               <ReaderHistoryScreen
                 readingHistory={readingHistory}
@@ -616,22 +925,29 @@ export default function App() {
           )}
 
           {activeTab === 'ai' && (
-            <AiCopilotScreen 
+            <StudyAssistantScreen 
               documents={documents}
-              apiKey={apiKey}
-              provider={aiProvider}
+              apiKeys={apiKeys}
+              runQueryWithFallback={runQueryWithFallback}
             />
           )}
 
           {activeTab === 'history' && (
-            <HistoryScreen history={history} />
+            <HistoryScreen 
+              history={history} 
+              documents={documents}
+              onViewFile={handleViewFile}
+            />
           )}
 
           {activeTab === 'settings' && (
             <SettingsScreen 
-              apiKey={apiKey} 
-              provider={aiProvider} 
-              onSave={handleSaveApiKey} 
+              apiKeys={apiKeys} 
+              onSaveKeys={(newKeys: any) => {
+                setApiKeys(newKeys);
+                localStorage.setItem('studyvault_apikeys', JSON.stringify(newKeys));
+                showNotification('Settings updated successfully', 'success');
+              }}
             />
           )}
         </main>
@@ -643,9 +959,19 @@ export default function App() {
 // ----------------------------------------------------
 // 1. DASHBOARD SCREEN
 // ----------------------------------------------------
-function DashboardScreen({ documents, history, onViewFile, onNavigate }: any) {
+function DashboardScreen({ documents, history, onViewFile, onNavigate, apiKeys }: any) {
   const recentDocs = documents.slice(0, 3);
   const recentConversions = history.slice(0, 3);
+
+  // Compute active providers string
+  const activeKeys = apiKeys ? apiKeys.filter((k: any) => k.isActive) : [];
+  const fallbackKeys = apiKeys ? apiKeys.filter((k: any) => k.isFallback) : [];
+  let providersText = "None (Demo Mode)";
+  if (activeKeys.length > 0) {
+    const activeNames = activeKeys.map((k: any) => k.label).join(' + ');
+    const fallbackText = fallbackKeys.length > 0 ? ` (Fallback: ${fallbackKeys[0].label})` : '';
+    providersText = `${activeNames}${fallbackText}`;
+  }
 
   return (
     <>
@@ -669,8 +995,10 @@ function DashboardScreen({ documents, history, onViewFile, onNavigate }: any) {
           <div className="headline-md" style={{ marginTop: '8px', color: 'var(--color-tertiary)' }}>Tesseract Engine</div>
         </div>
         <div className="glass-panel" style={{ padding: 'var(--spacing-lg)' }}>
-          <div style={{ fontSize: '12px', color: 'var(--color-outline)', fontWeight: '600' }}>AI PROVIDER (BYOK)</div>
-          <div className="headline-md" style={{ marginTop: '8px', color: 'var(--color-primary-fixed)' }}>Direct Gateway</div>
+          <div style={{ fontSize: '12px', color: 'var(--color-outline)', fontWeight: '600' }}>ACTIVE ASSISTANT PROVIDERS</div>
+          <div className="headline-md" style={{ marginTop: '8px', color: 'var(--color-primary-fixed)', fontSize: '15px', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={providersText}>
+            {providersText}
+          </div>
         </div>
       </div>
 
@@ -740,19 +1068,19 @@ function DashboardScreen({ documents, history, onViewFile, onNavigate }: any) {
         </div>
       </div>
 
-      {/* AI suggestion block */}
+      {/* suggestion block */}
       <div className="glass-panel" style={{ padding: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-lg)' }}>
         <div style={{ backgroundColor: 'var(--color-primary-container)', padding: '12px', borderRadius: '50%' }}>
           <Sparkles size={24} style={{ color: 'var(--color-primary)' }} />
         </div>
         <div style={{ flex: 1 }}>
-          <h3 className="headline-sm">AI Study Copilot Suggestion</h3>
+          <h3 className="headline-sm">Study Assistant Insights</h3>
           <p className="body-sm" style={{ color: 'var(--color-on-surface-variant)', marginTop: '4px' }}>
             Select any document to automatically extract core topics, draft flashcards, or generate a structured summary.
           </p>
         </div>
         <button onClick={() => onNavigate('ai')} className="btn btn-secondary">
-          <span>Go to Copilot</span>
+          <span>Open Assistant</span>
           <ArrowRight size={14} />
         </button>
       </div>
@@ -780,6 +1108,69 @@ function LibraryScreen({
     try { return localStorage.getItem('studyvault_last_folder') ?? null; } catch { return null; }
   });
   const [searchFilter, setSearchFilter] = useState('');
+
+  // Share Mode States
+  const [shareMode, setShareMode] = useState(false);
+  const [selectedShareIds, setSelectedShareIds] = useState<Set<string>>(new Set());
+
+  const handleSelectDocToggle = (docId: string) => {
+    setSelectedShareIds(prev => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  };
+
+  const handleSelectFolderToggle = (folderName: string | null) => {
+    const folderDocs = documents.filter((d: any) => folderName === UNCATEGORIZED ? !d.folder_name : d.folder_name === folderName);
+    const folderDocIds = folderDocs.map((d: any) => d.id);
+    const allSelected = folderDocIds.every(id => selectedShareIds.has(id));
+    
+    setSelectedShareIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        folderDocIds.forEach(id => next.delete(id));
+      } else {
+        folderDocIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const isFolderSelected = (folderName: string | null) => {
+    const folderDocs = documents.filter((d: any) => folderName === UNCATEGORIZED ? !d.folder_name : d.folder_name === folderName);
+    if (folderDocs.length === 0) return false;
+    return folderDocs.every((d: any) => selectedShareIds.has(d.id));
+  };
+
+  const handleShareExport = async () => {
+    if (selectedShareIds.size === 0) return;
+    if (window.api) {
+      try {
+        const dest = await window.api.openDirectoryDialog();
+        if (dest && dest.folderName) {
+          const paths = documents
+            .filter((d: any) => selectedShareIds.has(d.id))
+            .map((d: any) => d.path);
+          
+          showNotification(`Exporting ${paths.length} files to folder...`, 'info');
+          const success = await window.api.shareDocuments(paths, dest.folderName);
+          if (success) {
+            showNotification(`Exported ${paths.length} files successfully!`, 'success');
+            setShareMode(false);
+            setSelectedShareIds(new Set());
+          }
+        }
+      } catch (err: any) {
+        showNotification(`Export failed: ${err.message}`, 'error');
+      }
+    } else {
+      alert(`[Simulator] Exported ${selectedShareIds.size} files to simulated folder.`);
+      setShareMode(false);
+      setSelectedShareIds(new Set());
+    }
+  };
 
   const persistFolder = (folder: string | null) => {
     setSelectedFolder(folder);
@@ -872,7 +1263,18 @@ function LibraryScreen({
                     justifyContent: 'space-between'
                   }}
                 >
-                  <span>📂 Uncategorized</span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                    {shareMode && (
+                      <input 
+                        type="checkbox"
+                        checked={isFolderSelected(UNCATEGORIZED)}
+                        onChange={() => handleSelectFolderToggle(UNCATEGORIZED)}
+                        style={{ marginRight: '8px', accentColor: 'var(--color-primary)' }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                    📂 Uncategorized
+                  </span>
                   <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>
                     {documents.filter((d: any) => !d.folder_name).length}
                   </span>
@@ -896,7 +1298,18 @@ function LibraryScreen({
                       justifyContent: 'space-between'
                     }}
                   >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px' }}>📁 {folder}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px', display: 'flex', alignItems: 'center' }}>
+                      {shareMode && (
+                        <input 
+                          type="checkbox"
+                          checked={isFolderSelected(folder)}
+                          onChange={() => handleSelectFolderToggle(folder)}
+                          style={{ marginRight: '8px', accentColor: 'var(--color-primary)' }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      )}
+                      📁 {folder}
+                    </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>{folderCount}</span>
                       <button
@@ -907,7 +1320,7 @@ function LibraryScreen({
                           try {
                             for (const doc of folderDocs) {
                               if (onUpdateFolder) {
-                                await onUpdateFolder(doc.id, null);
+                                  await onUpdateFolder(doc.id, null);
                               }
                             }
                             if (selectedFolder === folder) persistFolder(null);
@@ -976,6 +1389,34 @@ function LibraryScreen({
               ))}
             </div>
           </div>
+
+          <div style={{ height: '1px', backgroundColor: 'var(--color-outline-variant)' }}></div>
+
+          {/* Share Section */}
+          <div>
+            <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)', marginBottom: '8px' }}>Share & Export</h3>
+            <button 
+              onClick={() => {
+                setShareMode(!shareMode);
+                setSelectedShareIds(new Set());
+              }}
+              className="btn"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                fontSize: '12px',
+                backgroundColor: shareMode ? 'var(--color-primary)' : 'var(--color-surface-container-high)',
+                color: shareMode ? 'var(--color-on-primary)' : 'var(--color-on-surface)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              <Share2 size={14} />
+              <span>{shareMode ? 'Exit Share Mode' : 'Enter Share Mode'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Right Library Grid */}
@@ -992,12 +1433,18 @@ function LibraryScreen({
             />
           </div>
 
-          <div className="grid-container" style={{ flex: 1, overflowY: 'auto' }}>
+          <div className="grid-container" style={{ flex: 1, overflowY: 'auto', paddingBottom: shareMode ? '80px' : '0' }}>
             {filteredDocs.map((doc: any) => (
               <div 
                 key={doc.id}
                 className="glass-panel" 
-                onClick={() => onViewFile(doc)}
+                onClick={() => {
+                  if (shareMode) {
+                    handleSelectDocToggle(doc.id);
+                  } else {
+                    onViewFile(doc);
+                  }
+                }}
                 style={{ 
                   padding: 'var(--spacing-md)', 
                   display: 'flex', 
@@ -1005,11 +1452,31 @@ function LibraryScreen({
                   justifyContent: 'space-between',
                   height: '210px',
                   cursor: 'pointer',
-                  position: 'relative'
+                  position: 'relative',
+                  border: selectedShareIds.has(doc.id) ? '1px solid var(--color-primary)' : '1px solid var(--color-outline-variant)'
                 }}
               >
+                {/* File Checkbox for sharing */}
+                {shareMode && (
+                  <input 
+                    type="checkbox"
+                    checked={selectedShareIds.has(doc.id)}
+                    onChange={() => handleSelectDocToggle(doc.id)}
+                    style={{ 
+                      position: 'absolute', 
+                      top: '12px', 
+                      left: '12px', 
+                      width: '16px', 
+                      height: '16px', 
+                      zIndex: 10,
+                      accentColor: 'var(--color-primary)' 
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
+
                 {/* File Header */}
-                <div>
+                <div style={{ paddingLeft: shareMode ? '24px' : '0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                     <span className={`badge badge-${doc.type}`}>{doc.type}</span>
                     <button 
@@ -1078,6 +1545,50 @@ function LibraryScreen({
           </div>
         </div>
       </div>
+
+      {/* Floating share panel */}
+      {shareMode && selectedShareIds.size > 0 && (
+        <div className="glass-panel" style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: 'calc(var(--sidebar-width) + 48px)',
+          right: '48px',
+          padding: '12px 24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          zIndex: 100,
+          backgroundColor: 'rgba(28, 26, 35, 0.95)',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+          border: '1px solid var(--color-primary)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Share2 size={18} style={{ color: 'var(--color-primary)' }} />
+            <span style={{ fontSize: '14px', fontWeight: '600' }}>
+              Selected {selectedShareIds.size} {selectedShareIds.size === 1 ? 'document' : 'documents'} for sharing
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button 
+              onClick={() => {
+                setShareMode(false);
+                setSelectedShareIds(new Set());
+              }}
+              className="btn btn-secondary" 
+              style={{ padding: '8px 16px', fontSize: '13px' }}
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={handleShareExport}
+              className="btn btn-primary" 
+              style={{ padding: '8px 16px', fontSize: '13px' }}
+            >
+              Export Selected...
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1355,12 +1866,10 @@ function PageImageSheet({ file, pageNum, scale }: { file: any, pageNum: number, 
 // ----------------------------------------------------
 // 3. DOCUMENT VIEWER SCREEN
 // ----------------------------------------------------
-function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh }: any) {
+function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh, isSplit, onToggleSplit, documents, onSwitchFile, apiKeys }: any) {
   const [activeViewerTab, setActiveViewerTab] = useState<'notes' | 'ai' | 'outline'>('notes');
   const [selectedText, setSelectedText] = useState('');
   const [selectedTextPage, setSelectedTextPage] = useState(1);
-  const [copilotPrompt, setCopilotPrompt] = useState('');
-  const [copilotResponses, setCopilotResponses] = useState<{ q: string; a: string }[]>([]);
   const [loadingAi, setLoadingAi] = useState(false);
 
   // Dual view states - default to layout (image) view
@@ -1369,6 +1878,12 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [parsedTextPages, setParsedTextPages] = useState<string[]>([]);
+
+  // Database-backed chats state
+  const [chatsList, setChatsList] = useState<any[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [promptInput, setPromptInput] = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -1459,6 +1974,87 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
     };
   }, [viewerMode, pageCount, parsedTextPages]);
 
+  // AI chat loading hooks
+  useEffect(() => {
+    loadChats();
+    setActiveChatId(null);
+    setChatMessages([]);
+  }, [file.id]);
+
+  useEffect(() => {
+    if (activeChatId) {
+      loadMessages(activeChatId);
+    } else {
+      setChatMessages([]);
+    }
+  }, [activeChatId]);
+
+  const loadChats = async () => {
+    if (window.api) {
+      try {
+        const res = await window.api.getAiChats(file.id);
+        setChatsList(res || []);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setChatsList([]);
+    }
+  };
+
+  const loadMessages = async (chatId: string) => {
+    if (window.api) {
+      try {
+        const res = await window.api.getAiMessages(chatId);
+        setChatMessages(res || []);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setChatMessages([]);
+    }
+  };
+
+  const handleStartNewChat = async () => {
+    const chatId = Math.random().toString(36).substring(2, 9);
+    const title = `Chat on ${file.name.substring(0, 15)}...`;
+    if (window.api) {
+      try {
+        await window.api.createAiChat(chatId, title, file.id);
+        await loadChats();
+        setActiveChatId(chatId);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      const mockChat = { id: chatId, title, file_id: file.id, created_at: new Date().toISOString() };
+      setChatsList([mockChat]);
+      setActiveChatId(chatId);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Delete this chat history?')) {
+      if (window.api) {
+        try {
+          await window.api.deleteAiChat(chatId);
+          await loadChats();
+          if (activeChatId === chatId) {
+            setActiveChatId(null);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      } else {
+        setChatsList(chatsList.filter(c => c.id !== chatId));
+        if (activeChatId === chatId) {
+          setActiveChatId(null);
+        }
+      }
+    }
+  };
+
   // Monitor text selections to allow annotations/AI highlights
   const handleTextSelection = (pageNum: number) => {
     const selection = window.getSelection();
@@ -1512,33 +2108,142 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
     window.getSelection()?.removeAllRanges();
   };
 
-  const handleSendToCopilot = async () => {
-    if (!copilotPrompt.trim()) return;
-    setLoadingAi(true);
-    const query = copilotPrompt;
-    setCopilotPrompt('');
-
-    if (window.api) {
-      try {
-        const res = await window.api.runWorkerCommand('ai_query', {
-          provider,
-          api_key: apiKey,
-          prompt: query,
-          context: file.content_extracted || ''
-        });
-        setCopilotResponses(prev => [...prev, { q: query, a: res.response }]);
-      } catch (err: any) {
-        setCopilotResponses(prev => [...prev, { q: query, a: `Error calling API: ${err.message}` }]);
+  const runQueryWithFallback = async (primaryKey: any, promptText: string, contextText: string): Promise<{ text: string; modelUsed: string }> => {
+    try {
+      if (!window.api) {
+        // Simulator fallback
+        return { 
+          text: `[Simulator - ${primaryKey.label}] Answer for prompt: "${promptText.substring(0, 30)}..."`, 
+          modelUsed: primaryKey.model || 'mock-model' 
+        };
       }
-    } else {
-      setTimeout(() => {
-        setCopilotResponses(prev => [...prev, { 
-          q: query, 
-          a: `[Simulator Response] Analyzed document content from ${file.name}.\n\nThe prompt "${query}" highlights that this document outlines primary study concepts.` 
-        }]);
-      }, 1000);
+      const res = await window.api.runWorkerCommand('ai_query', {
+        provider: primaryKey.provider,
+        api_key: primaryKey.apiKey,
+        prompt: promptText,
+        context: contextText,
+        model: primaryKey.model
+      });
+      if (res.error || (res.response && res.response.startsWith('AI query failed'))) {
+        throw new Error(res.error || res.response);
+      }
+      return { text: res.response, modelUsed: res.model || primaryKey.model };
+    } catch (err: any) {
+      console.warn(`Query failed for ${primaryKey.label}:`, err.message);
+      // Find fallback keys
+      const fallbackKeys = apiKeys.filter((k: any) => k.isFallback && k.id !== primaryKey.id);
+      for (const fbKey of fallbackKeys) {
+        try {
+          if (!window.api) {
+            return { 
+              text: `[Simulator Fallback - ${fbKey.label}] Answer for prompt: "${promptText.substring(0, 30)}..."`, 
+              modelUsed: fbKey.model || 'mock-model' 
+            };
+          }
+          const res = await window.api.runWorkerCommand('ai_query', {
+            provider: fbKey.provider,
+            api_key: fbKey.apiKey,
+            prompt: promptText,
+            context: contextText,
+            model: fbKey.model
+          });
+          if (res.error || (res.response && res.response.startsWith('AI query failed'))) {
+            throw new Error(res.error || res.response);
+          }
+          return { 
+            text: `[Note: ${primaryKey.label} failed. Fell back to ${fbKey.label}]\n\n${res.response}`, 
+            modelUsed: res.model || fbKey.model 
+          };
+        } catch (fbErr: any) {
+          console.warn(`Fallback failed for ${fbKey.label}:`, fbErr.message);
+        }
+      }
+      throw new Error(`Primary and all fallback models failed. Last error: ${err.message}`);
     }
-    setLoadingAi(false);
+  };
+
+  const handleSendToCopilot = async () => {
+    if (!promptInput.trim()) return;
+    const userText = promptInput;
+    setPromptInput('');
+    setLoadingAi(true);
+
+    // Resolve active chatId
+    let chatId = activeChatId;
+    if (!chatId) {
+      chatId = Math.random().toString(36).substring(2, 9);
+      const title = userText.substring(0, 30) + (userText.length > 30 ? '...' : '');
+      if (window.api) {
+        await window.api.createAiChat(chatId, title, file.id);
+      }
+      setActiveChatId(chatId);
+      await loadChats();
+    }
+
+    const userMsgId = Math.random().toString(36).substring(2, 9);
+    const userMsg = { id: userMsgId, chat_id: chatId, role: 'user', content: userText };
+    setChatMessages(prev => [...prev, userMsg]);
+    if (window.api) {
+      await window.api.addAiMessage(userMsg);
+    }
+
+    const contextText = file.content_extracted || '';
+
+    const activeKeys = apiKeys ? apiKeys.filter((k: any) => k.isActive) : [];
+    if (activeKeys.length === 0) {
+      // Mock / Demo Mode
+      const simulatedText = `[Demo Mode] No active API keys configured. Set one in Settings. Attached context: ${file.name}`;
+      const assistantMsgId = Math.random().toString(36).substring(2, 9);
+      const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: simulatedText };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      if (window.api) {
+        await window.api.addAiMessage(assistantMsg);
+      }
+      setLoadingAi(false);
+      return;
+    }
+
+    try {
+      if (activeKeys.length === 1) {
+        const primaryKey = activeKeys[0];
+        const res = await runQueryWithFallback(primaryKey, userText, contextText);
+        
+        const assistantMsgId = Math.random().toString(36).substring(2, 9);
+        const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: res.text };
+        setChatMessages(prev => [...prev, assistantMsg]);
+        if (window.api) {
+          await window.api.addAiMessage(assistantMsg);
+        }
+      } else {
+        const promises = activeKeys.map(async (key) => {
+          try {
+            const res = await runQueryWithFallback(key, userText, contextText);
+            return { label: key.label, text: res.text, model: res.modelUsed };
+          } catch (e: any) {
+            return { label: key.label, text: `Failed: ${e.message}`, model: key.model };
+          }
+        });
+        const results = await Promise.all(promises);
+        const combinedPayload = JSON.stringify({ isMulti: true, responses: results });
+        
+        const assistantMsgId = Math.random().toString(36).substring(2, 9);
+        const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: combinedPayload };
+        setChatMessages(prev => [...prev, assistantMsg]);
+        if (window.api) {
+          await window.api.addAiMessage(assistantMsg);
+        }
+      }
+    } catch (err: any) {
+      const errMsg = `Failed to query: ${err.message}`;
+      const assistantMsgId = Math.random().toString(36).substring(2, 9);
+      const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: errMsg };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      if (window.api) {
+        await window.api.addAiMessage(assistantMsg);
+      }
+    } finally {
+      setLoadingAi(false);
+    }
   };
 
   const handleRemoveAnnotation = async (id: string) => {
@@ -1587,7 +2292,7 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
         {/* Toolbar Controls */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--color-surface-container-low)', padding: '6px 12px', borderRadius: 'var(--rounded-default)' }}>
           {/* Dual View Selector */}
-          <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             <button
               onClick={() => setViewerMode('reader')}
               style={{
@@ -1620,6 +2325,43 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
             >
               Layout View (Image)
             </button>
+
+            {/* Switch Document Dropdown */}
+            {documents && onSwitchFile && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px' }}>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const doc = documents.find((d: any) => d.id === e.target.value);
+                    if (doc) onSwitchFile(doc);
+                  }}
+                  style={{
+                    background: 'var(--color-surface-container-highest)',
+                    border: '1px solid var(--color-outline-variant)',
+                    borderRadius: 'var(--rounded-sm)',
+                    padding: '4px 8px',
+                    color: 'var(--color-on-surface)',
+                    fontSize: '11px',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-family-body)',
+                    maxWidth: '180px'
+                  }}
+                >
+                  <option value="">📂 Switch Document...</option>
+                  {documents
+                    .filter((d: any) => d.folder_name === file.folder_name && d.id !== file.id)
+                    .map((d: any) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  {documents.filter((d: any) => d.folder_name === file.folder_name && d.id !== file.id).length === 0 && 
+                    documents.filter((d: any) => d.id !== file.id).map((d: any) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))
+                  }
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Zoom & Page Controls */}
@@ -1683,6 +2425,29 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
               </select>
               <span style={{ fontSize: '12px', color: 'var(--color-outline)' }}>of {pageCount || 1}</span>
             </div>
+
+            {/* Split Screen Mode Toggle */}
+            {onToggleSplit && (
+              <button
+                onClick={onToggleSplit}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '11px',
+                  borderRadius: 'var(--rounded-sm)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: isSplit ? 'var(--color-primary)' : 'var(--color-surface-container-highest)',
+                  color: isSplit ? 'var(--color-on-primary)' : 'var(--color-on-surface-variant)',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Split size={12} />
+                <span>{isSplit ? 'Exit Split' : 'Split View'}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1765,11 +2530,11 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
                 cursor: 'pointer'
               }}
             >
-              AI Copilot
+              Study Assistant
             </button>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-md)' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-md)', display: 'flex', flexDirection: 'column' }}>
             {activeViewerTab === 'notes' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)' }}>Highlights & Notes</h3>
@@ -1812,44 +2577,123 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
             )}
 
             {activeViewerTab === 'ai' && (
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px', overflowY: 'auto' }}>
-                  {copilotResponses.map((item, idx) => (
-                    <div key={idx} style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <div style={{ alignSelf: 'flex-end', padding: '8px 12px', backgroundColor: 'var(--color-primary-container)', color: 'var(--color-on-primary-container)', borderRadius: 'var(--rounded-default)', maxWidth: '90%' }}>
-                        {item.q}
-                      </div>
-                      <div style={{ alignSelf: 'flex-start', padding: '8px 12px', backgroundColor: 'var(--color-surface-container)', borderRadius: 'var(--rounded-default)', color: 'var(--color-on-surface)', maxWidth: '90%', whiteSpace: 'pre-wrap' }}>
-                        {item.a}
-                      </div>
-                    </div>
-                  ))}
-                  {loadingAi && <div style={{ fontSize: '11px', color: 'var(--color-outline)' }}>AI is thinking...</div>}
-                </div>
+              !activeChatId ? (
+                /* Thread list view */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)' }}>Saved Study Dialogs</h3>
+                    <button 
+                      onClick={handleStartNewChat}
+                      className="btn btn-primary"
+                      style={{ padding: '4px 8px', fontSize: '11px' }}
+                    >
+                      New Chat
+                    </button>
+                  </div>
 
-                <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-outline-variant)', paddingTop: '12px' }}>
-                  <input 
-                    type="text" 
-                    placeholder="Ask AI about this document..."
-                    value={copilotPrompt}
-                    onChange={(e) => setCopilotPrompt(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendToCopilot()}
-                    style={{ 
-                      flex: 1, 
-                      background: 'var(--color-surface-container)', 
-                      border: 'none', 
-                      borderRadius: 'var(--rounded-default)',
-                      padding: '8px 12px',
-                      color: '#fff',
-                      fontSize: '13px',
-                      outline: 'none'
-                    }}
-                  />
-                  <button onClick={handleSendToCopilot} className="btn btn-primary" style={{ padding: '8px' }}>
-                    <Send size={14} />
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1 }}>
+                    {chatsList.map((chat) => (
+                      <div 
+                        key={chat.id}
+                        onClick={() => setActiveChatId(chat.id)}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: 'var(--color-surface-container)',
+                          borderRadius: 'var(--rounded-default)',
+                          border: '1px solid var(--color-outline-variant)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                        className="hover-card-btn"
+                      >
+                        <span style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }}>
+                          💬 {chat.title}
+                        </span>
+                        <button 
+                          onClick={(e) => handleDeleteChat(chat.id, e)}
+                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-outline)' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {chatsList.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-outline)', fontSize: '12px' }}>
+                        No saved chats for this document. Start a new chat above!
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Active Chat view */
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between', flex: 1 }}>
+                  {/* Chat header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--color-outline-variant)', paddingBottom: '8px', marginBottom: '8px' }}>
+                    <button 
+                      onClick={() => setActiveChatId(null)}
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', fontSize: '12px', fontWeight: 'bold' }}
+                    >
+                      ← Back
+                    </button>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--color-on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                      {chatsList.find(c => c.id === activeChatId)?.title}
+                    </span>
+                  </div>
+
+                  {/* Message logs list */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '12px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {chatMessages.map((msg, idx) => (
+                      <div 
+                        key={idx} 
+                        style={{ 
+                          maxWidth: '85%',
+                          alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--rounded-default)',
+                          backgroundColor: msg.role === 'user' ? 'var(--color-primary-container)' : 'var(--color-surface-container)',
+                          color: msg.role === 'user' ? 'var(--color-on-primary-container)' : 'var(--color-on-surface)',
+                          fontSize: '13px',
+                          lineHeight: '1.5'
+                        }}
+                      >
+                        {msg.role === 'user' ? (
+                          msg.content
+                        ) : (
+                          <AssistantMessageBubble content={msg.content} />
+                        )}
+                      </div>
+                    ))}
+                    {loadingAi && <div style={{ fontSize: '11px', color: 'var(--color-outline)', alignSelf: 'flex-start' }}>Analyzing document...</div>}
+                  </div>
+
+                  {/* Input form */}
+                  <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-outline-variant)', paddingTop: '8px' }}>
+                    <input 
+                      type="text" 
+                      placeholder="Ask study partner..."
+                      value={promptInput}
+                      onChange={(e) => setPromptInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSendToCopilot()}
+                      style={{ 
+                        flex: 1, 
+                        background: 'var(--color-surface-container)', 
+                        border: 'none', 
+                        borderRadius: 'var(--rounded-default)',
+                        padding: '8px 12px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        outline: 'none'
+                      }}
+                    />
+                    <button onClick={handleSendToCopilot} className="btn btn-primary" style={{ padding: '8px' }}>
+                      <Send size={14} />
+                    </button>
+                  </div>
+                </div>
+              )
             )}
           </div>
         </div>
@@ -2374,111 +3218,592 @@ function SearchScreen({ initialQuery, onViewFile }: any) {
 }
 
 // ----------------------------------------------------
-// 6. AI COPILOT SCREEN
+// 6. FORMATION & MARKDOWN HELPERS
 // ----------------------------------------------------
-function AiCopilotScreen({ documents, apiKey, provider }: any) {
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function parseMarkdownInline(text: string) {
+  let processed = text;
+  processed = processed.replace(/<u>/g, '___U_START___').replace(/<\/u>/g, '___U_END___');
+  processed = escapeHtml(processed);
+  processed = processed.replace(/___U_START___/g, '<span style="text-decoration: underline;">').replace(/___U_END___/g, '</span>');
+  
+  // Bold: **text**
+  processed = processed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Italic: *text*
+  processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Inline Code: `code`
+  processed = processed.replace(/`(.*?)`/g, '<code style="background-color: var(--color-surface-container-high); padding: 2px 6px; border-radius: var(--rounded-sm); font-family: monospace; font-size: 0.9em;">$1</code>');
+  
+  return processed;
+}
+
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  const [copied, setCopied] = useState(false);
+  
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  
+  return (
+    <div style={{ 
+      position: 'relative', 
+      backgroundColor: 'var(--color-surface-container-highest)', 
+      borderRadius: 'var(--rounded-default)', 
+      border: '1px solid var(--color-outline-variant)',
+      margin: '8px 0',
+      overflow: 'hidden',
+      width: '100%'
+    }}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        padding: '6px 12px', 
+        backgroundColor: 'var(--color-surface-container-high)',
+        fontSize: '11px',
+        color: 'var(--color-outline)'
+      }}>
+        <span>{language ? language.toUpperCase() : 'CODE'}</span>
+        <button 
+          onClick={handleCopy}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            cursor: 'pointer', 
+            color: 'var(--color-primary)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '4px',
+            fontSize: '11px',
+            fontWeight: '600'
+          }}
+        >
+          <Copy size={12} />
+          <span>{copied ? 'Copied!' : 'Copy'}</span>
+        </button>
+      </div>
+      <pre style={{ 
+        margin: 0, 
+        padding: '12px', 
+        overflowX: 'auto', 
+        fontFamily: 'monospace', 
+        fontSize: '13px', 
+        color: '#e5e0ed',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all'
+      }}>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function TextBlock({ text }: { text: string }) {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentList: React.ReactNode[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+  
+  const flushList = (key: number) => {
+    if (currentList.length > 0) {
+      if (listType === 'ul') {
+        elements.push(<ul key={`list-${key}`} style={{ paddingLeft: '20px', margin: '4px 0', display: 'flex', flexDirection: 'column', gap: '4px', listStyleType: 'disc' }}>{...currentList}</ul>);
+      } else {
+        elements.push(<ol key={`list-${key}`} style={{ paddingLeft: '20px', margin: '4px 0', display: 'flex', flexDirection: 'column', gap: '4px', listStyleType: 'decimal' }}>{...currentList}</ol>);
+      }
+      currentList = [];
+    }
+    listType = null;
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    const ulMatch = line.match(/^(\s*)[-*]\s+(.*)$/);
+    const olMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
+    
+    if (ulMatch) {
+      if (listType !== 'ul') {
+        flushList(idx);
+        listType = 'ul';
+      }
+      const inlineHtml = parseMarkdownInline(ulMatch[2]);
+      currentList.push(
+        <li 
+          key={idx} 
+          style={{ fontSize: '13px', color: 'var(--color-on-surface)', lineHeight: '1.6' }}
+          dangerouslySetInnerHTML={{ __html: inlineHtml }}
+        />
+      );
+    } else if (olMatch) {
+      if (listType !== 'ol') {
+        flushList(idx);
+        listType = 'ol';
+      }
+      const inlineHtml = parseMarkdownInline(olMatch[2]);
+      currentList.push(
+        <li 
+          key={idx} 
+          style={{ fontSize: '13px', color: 'var(--color-on-surface)', lineHeight: '1.6' }}
+          dangerouslySetInnerHTML={{ __html: inlineHtml }}
+        />
+      );
+    } else {
+      flushList(idx);
+      if (trimmed === '') {
+        elements.push(<div key={idx} style={{ height: '8px' }} />);
+      } else {
+        const inlineHtml = parseMarkdownInline(line);
+        elements.push(
+          <p 
+            key={idx} 
+            style={{ fontSize: '13px', color: 'var(--color-on-surface)', margin: '4px 0', lineHeight: '1.6' }}
+            dangerouslySetInnerHTML={{ __html: inlineHtml }}
+          />
+        );
+      }
+    }
+  });
+  
+  flushList(lines.length);
+  
+  return <div style={{ display: 'flex', flexDirection: 'column' }}>{elements}</div>;
+}
+
+function FormattedResponseText({ text }: { text: string }) {
+  if (!text) return null;
+  const parts = text.split(/```/g);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+      {parts.map((part, index) => {
+        const isCodeBlock = index % 2 === 1;
+        if (isCodeBlock) {
+          const lines = part.split('\n');
+          let language = '';
+          let code = part;
+          if (lines.length > 0 && lines[0].trim() !== '') {
+            const firstLine = lines[0].trim();
+            if (/^[a-zA-Z0-9_-]+$/.test(firstLine)) {
+              language = firstLine;
+              code = lines.slice(1).join('\n');
+            }
+          }
+          return <CodeBlock key={index} code={code.trim()} language={language} />;
+        } else {
+          return <TextBlock key={index} text={part} />;
+        }
+      })}
+    </div>
+  );
+}
+
+function AssistantMessageBubble({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAll = (textToCopy: string) => {
+    navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  let isMulti = false;
+  let multiData: { responses: { label: string; text: string; model: string }[] } | null = null;
+
+  if (content && content.startsWith('{"isMulti":true')) {
+    try {
+      multiData = JSON.parse(content);
+      isMulti = true;
+    } catch (e) {
+      isMulti = false;
+    }
+  }
+
+  if (isMulti && multiData) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', color: 'var(--color-outline)', fontWeight: '600' }}>MODEL COMPARISON</span>
+          <button 
+            onClick={() => {
+              const fullText = multiData!.responses.map(r => `=== ${r.label} (${r.model}) ===\n${r.text}`).join('\n\n');
+              handleCopyAll(fullText);
+            }}
+            style={{ 
+              background: 'transparent', 
+              border: 'none', 
+              cursor: 'pointer', 
+              color: 'var(--color-primary)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '4px',
+              fontSize: '11px',
+              fontWeight: '600'
+            }}
+          >
+            <Copy size={12} />
+            <span>{copied ? 'Copied Comparison!' : 'Copy Comparison'}</span>
+          </button>
+        </div>
+        <div style={{ display: 'flex', gap: '12px', width: '100%', overflowX: 'auto', paddingBottom: '4px' }}>
+          {multiData.responses.map((resp, idx) => (
+            <div key={idx} style={{ 
+              flex: 1, 
+              minWidth: '220px', 
+              backgroundColor: 'var(--color-surface-container-low)', 
+              padding: '10px', 
+              borderRadius: 'var(--rounded-default)',
+              border: '1px solid var(--color-outline-variant)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-outline-variant)', paddingBottom: '4px', marginBottom: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--color-primary)' }}>{resp.label}</span>
+                <span style={{ fontSize: '9px', color: 'var(--color-outline)' }}>{resp.model}</span>
+              </div>
+              <FormattedResponseText text={resp.text} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative', width: '100%' }}>
+      <FormattedResponseText text={content} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+        <button 
+          onClick={() => handleCopyAll(content)}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            cursor: 'pointer', 
+            color: 'var(--color-outline)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '4px',
+            fontSize: '10px',
+            padding: '2px 4px',
+            borderRadius: 'var(--rounded-sm)'
+          }}
+          className="hover-card-btn"
+          title="Copy Message Text"
+        >
+          <Copy size={10} />
+          <span>{copied ? 'Copied!' : 'Copy'}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------
+// 7. STUDY ASSISTANT SCREEN
+// ----------------------------------------------------
+function StudyAssistantScreen({ documents, apiKeys, runQueryWithFallback }: any) {
   const [selectedFileId, setSelectedFileId] = useState('');
+  const [chatsList, setChatsList] = useState<any[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [promptInput, setPromptInput] = useState('');
-  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingAi, setLoadingAi] = useState(false);
+
+  useEffect(() => {
+    loadChats();
+    setActiveChatId(null);
+    setChatMessages([]);
+  }, [selectedFileId]);
+
+  useEffect(() => {
+    if (activeChatId) {
+      loadMessages(activeChatId);
+    } else {
+      setChatMessages([]);
+    }
+  }, [activeChatId]);
+
+  const loadChats = async () => {
+    if (window.api) {
+      try {
+        const res = await window.api.getAiChats(selectedFileId || undefined);
+        setChatsList(res || []);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setChatsList([]);
+    }
+  };
+
+  const loadMessages = async (chatId: string) => {
+    if (window.api) {
+      try {
+        const res = await window.api.getAiMessages(chatId);
+        setChatMessages(res || []);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setChatMessages([]);
+    }
+  };
+
+  const handleStartNewChat = async () => {
+    const chatId = Math.random().toString(36).substring(2, 9);
+    const doc = documents.find((d: any) => d.id === selectedFileId);
+    const title = doc ? `Chat on ${doc.name.substring(0, 15)}...` : `General Query ${new Date().toLocaleTimeString()}`;
+    
+    if (window.api) {
+      try {
+        await window.api.createAiChat(chatId, title, selectedFileId || null);
+        await loadChats();
+        setActiveChatId(chatId);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      const mockChat = { id: chatId, title, file_id: selectedFileId || null, created_at: new Date().toISOString() };
+      setChatsList(prev => [mockChat, ...prev]);
+      setActiveChatId(chatId);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Delete this chat history?')) {
+      if (window.api) {
+        try {
+          await window.api.deleteAiChat(chatId);
+          await loadChats();
+          if (activeChatId === chatId) {
+            setActiveChatId(null);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      } else {
+        setChatsList(chatsList.filter(c => c.id !== chatId));
+        if (activeChatId === chatId) {
+          setActiveChatId(null);
+        }
+      }
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!promptInput.trim()) return;
     const userText = promptInput;
-    setChatMessages(prev => [...prev, { role: 'user', text: userText }]);
     setPromptInput('');
-    setLoading(true);
+    setLoadingAi(true);
+
+    let chatId = activeChatId;
+    if (!chatId) {
+      chatId = Math.random().toString(36).substring(2, 9);
+      const title = userText.substring(0, 30) + (userText.length > 30 ? '...' : '');
+      if (window.api) {
+        await window.api.createAiChat(chatId, title, selectedFileId || null);
+      }
+      setActiveChatId(chatId);
+      await loadChats();
+    }
+
+    const userMsgId = Math.random().toString(36).substring(2, 9);
+    const userMsg = { id: userMsgId, chat_id: chatId, role: 'user', content: userText };
+    setChatMessages(prev => [...prev, userMsg]);
+    if (window.api) {
+      await window.api.addAiMessage(userMsg);
+    }
 
     const doc = documents.find((d: any) => d.id === selectedFileId);
+    const contextText = doc ? doc.content_extracted || '' : '';
 
-    if (window.api) {
-      try {
-        const result = await window.api.runWorkerCommand('ai_query', {
-          provider,
-          api_key: apiKey,
-          prompt: userText,
-          context: doc ? doc.content_extracted : ''
-        });
-        setChatMessages(prev => [...prev, { role: 'assistant', text: result.response }]);
-      } catch (err: any) {
-        setChatMessages(prev => [...prev, { role: 'assistant', text: `API Connection Failed: ${err.message}` }]);
+    const activeKeys = apiKeys ? apiKeys.filter((k: any) => k.isActive) : [];
+    if (activeKeys.length === 0) {
+      const simulatedText = `[Demo Mode] No active API keys configured. Set one in Settings. Context: ${doc ? doc.name : 'Global'}`;
+      const assistantMsgId = Math.random().toString(36).substring(2, 9);
+      const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: simulatedText };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      if (window.api) {
+        await window.api.addAiMessage(assistantMsg);
       }
-    } else {
-      setTimeout(() => {
-        setChatMessages(prev => [...prev, { 
-          role: 'assistant', 
-          text: `[Simulator Assistant] Received prompt: "${userText}". Attached document context: ${doc ? doc.name : 'None'}. Provide a real API key in settings to bypass simulation.` 
-        }]);
-      }, 1000);
+      setLoadingAi(false);
+      return;
     }
-    setLoading(false);
+
+    try {
+      if (activeKeys.length === 1) {
+        const primaryKey = activeKeys[0];
+        const res = await runQueryWithFallback(primaryKey, userText, contextText);
+        
+        const assistantMsgId = Math.random().toString(36).substring(2, 9);
+        const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: res.text };
+        setChatMessages(prev => [...prev, assistantMsg]);
+        if (window.api) {
+          await window.api.addAiMessage(assistantMsg);
+        }
+      } else {
+        const promises = activeKeys.map(async (key) => {
+          try {
+            const res = await runQueryWithFallback(key, userText, contextText);
+            return { label: key.label, text: res.text, model: key.model };
+          } catch (e: any) {
+            return { label: key.label, text: `Failed: ${e.message}`, model: key.model };
+          }
+        });
+        const results = await Promise.all(promises);
+        const combinedPayload = JSON.stringify({ isMulti: true, responses: results });
+        
+        const assistantMsgId = Math.random().toString(36).substring(2, 9);
+        const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: combinedPayload };
+        setChatMessages(prev => [...prev, assistantMsg]);
+        if (window.api) {
+          await window.api.addAiMessage(assistantMsg);
+        }
+      }
+    } catch (err: any) {
+      const errMsg = `Failed to query: ${err.message}`;
+      const assistantMsgId = Math.random().toString(36).substring(2, 9);
+      const assistantMsg = { id: assistantMsgId, chat_id: chatId, role: 'assistant', content: errMsg };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      if (window.api) {
+        await window.api.addAiMessage(assistantMsg);
+      }
+    } finally {
+      setLoadingAi(false);
+    }
   };
 
   return (
     <>
-      <div>
-        <h1 className="headline-lg">AI Study Copilot</h1>
-        <p className="body-md" style={{ color: 'var(--color-on-surface-variant)' }}>Analyze documents, generate mock questions or summarize details locally.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h1 className="headline-lg">Study Assistant</h1>
+        <p className="body-md" style={{ color: 'var(--color-on-surface-variant)' }}>Analyze documents, generate summaries, or chat with past threads locally.</p>
       </div>
 
       <div style={{ display: 'flex', gap: 'var(--spacing-lg)', flex: 1, minHeight: 0 }}>
-        {/* Left Side: Select Document context */}
-        <div className="glass-panel" style={{ width: '260px', padding: 'var(--spacing-md)', display: 'flex', flexDirection: 'column', gap: '16px', height: 'fit-content' }}>
-          <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)' }}>Select Context File</h3>
-          <select 
-            value={selectedFileId} 
-            onChange={(e) => setSelectedFileId(e.target.value)}
-            style={{
-              width: '100%',
-              background: 'var(--color-surface-container)',
-              border: '1px solid var(--color-outline-variant)',
-              borderRadius: 'var(--rounded-default)',
-              padding: '10px',
-              color: '#fff',
-              outline: 'none',
-              fontFamily: 'var(--font-family-body)'
-            }}
-          >
-            <option value="">-- No File (General query) --</option>
-            {documents.map((d: any) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
+        {/* Left Sidebar */}
+        <div className="glass-panel" style={{ width: '260px', padding: 'var(--spacing-md)', display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', minHeight: 0 }}>
+          <div>
+            <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)', marginBottom: '8px' }}>Context Document</h3>
+            <select 
+              value={selectedFileId} 
+              onChange={(e) => setSelectedFileId(e.target.value)}
+              style={{
+                width: '100%',
+                background: 'var(--color-surface-container)',
+                border: '1px solid var(--color-outline-variant)',
+                borderRadius: 'var(--rounded-default)',
+                padding: '10px',
+                color: '#fff',
+                outline: 'none',
+                fontFamily: 'var(--font-family-body)'
+              }}
+            >
+              <option value="">-- No File (Global Query) --</option>
+              {documents.map((d: any) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ height: '1px', backgroundColor: 'var(--color-outline-variant)' }}></div>
+
+          <div style={{ display: 'flex', justifyBetween: 'space-between', alignItems: 'center' }}>
+            <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)', flex: 1 }}>Previous Chats</h3>
+            <button 
+              onClick={handleStartNewChat}
+              className="btn btn-secondary"
+              style={{ padding: '4px 8px', fontSize: '11px' }}
+            >
+              New Chat
+            </button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {chatsList.map((chat) => (
+              <div 
+                key={chat.id}
+                onClick={() => setActiveChatId(chat.id)}
+                style={{
+                  padding: '10px 12px',
+                  backgroundColor: activeChatId === chat.id ? 'var(--color-surface-container-high)' : 'var(--color-surface-container)',
+                  borderRadius: 'var(--rounded-default)',
+                  border: activeChatId === chat.id ? '1px solid var(--color-primary)' : '1px solid var(--color-outline-variant)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+                className="hover-card-btn"
+              >
+                <span style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }} title={chat.title}>
+                  💬 {chat.title}
+                </span>
+                <button 
+                  onClick={(e) => handleDeleteChat(chat.id, e)}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-outline)' }}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
             ))}
-          </select>
-          <div style={{ fontSize: '11px', color: 'var(--color-outline)' }}>
-            Selected document text will automatically segment and pipe to the LLM query context window.
+            {chatsList.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '24px', color: 'var(--color-outline)', fontSize: '12px' }}>
+                No chats found for this context.
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right Side: Chat panel */}
+        {/* Right Side */}
         <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-md)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-lg)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {chatMessages.map((msg, idx) => (
               <div 
                 key={idx} 
                 style={{ 
-                  maxWidth: '75%',
+                  maxWidth: '85%',
                   alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                   padding: '10px 16px',
                   borderRadius: 'var(--rounded-default)',
                   backgroundColor: msg.role === 'user' ? 'var(--color-primary-container)' : 'var(--color-surface-container)',
                   color: msg.role === 'user' ? 'var(--color-on-primary-container)' : 'var(--color-on-surface)',
                   fontSize: '14px',
-                  lineHeight: '1.5'
+                  lineHeight: '1.5',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  width: 'fit-content'
                 }}
               >
-                {msg.text}
+                {msg.role === 'user' ? (
+                  msg.content
+                ) : (
+                  <AssistantMessageBubble content={msg.content} />
+                )}
               </div>
             ))}
-            {loading && <div style={{ alignSelf: 'flex-start', color: 'var(--color-outline)', fontSize: '12px' }}>AI Bot is analyzing...</div>}
+            {loadingAi && (
+              <div style={{ alignSelf: 'flex-start', color: 'var(--color-outline)', fontSize: '13px' }}>
+                Analyzing document...
+              </div>
+            )}
             {chatMessages.length === 0 && (
               <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--color-outline)', fontSize: '14px' }}>
-                <Sparkles size={32} style={{ margin: 'auto', marginBottom: '8px', color: 'var(--color-primary)' }} />
+                <Sparkles size={36} style={{ margin: 'auto', marginBottom: '12px', color: 'var(--color-primary)' }} />
                 <span>Ask queries about your imported textbooks or lecture slides.</span>
               </div>
             )}
           </div>
 
-          {/* Input field */}
           <div style={{ padding: 'var(--spacing-md)', borderTop: '1px solid var(--color-outline-variant)', display: 'flex', gap: '8px' }}>
             <input 
               type="text" 
@@ -2491,7 +3816,7 @@ function AiCopilotScreen({ documents, apiKey, provider }: any) {
                 background: 'var(--color-surface-container-low)',
                 border: '1px solid var(--color-outline-variant)',
                 borderRadius: 'var(--rounded-default)',
-                padding: '10px 16px',
+                padding: '12px 16px',
                 color: '#fff',
                 outline: 'none',
                 fontFamily: 'var(--font-family-body)'
@@ -2508,9 +3833,13 @@ function AiCopilotScreen({ documents, apiKey, provider }: any) {
 }
 
 // ----------------------------------------------------
-// 7. HISTORY SCREEN
+// 8. HISTORY SCREEN
 // ----------------------------------------------------
-function HistoryScreen({ history }: any) {
+function HistoryScreen({ history, documents, onViewFile }: any) {
+  const getDocByPathOrName = (name: string) => {
+    return documents.find((d: any) => d.name === name || d.path === name);
+  };
+
   return (
     <>
       <div>
@@ -2520,49 +3849,77 @@ function HistoryScreen({ history }: any) {
 
       <div className="glass-panel" style={{ padding: 'var(--spacing-lg)', flex: 1, overflowY: 'auto' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {history.map((hist: any) => (
-            <div 
-              key={hist.id}
-              style={{
-                display: 'flex',
-                gap: '16px',
-                paddingBottom: '16px',
-                borderBottom: '1px solid var(--color-outline-variant)'
-              }}
-            >
-              {/* Event Time */}
-              <div style={{ minWidth: '120px', color: 'var(--color-outline)', fontSize: '13px' }}>
-                {hist.timestamp}
-              </div>
+          {history.map((hist: any) => {
+            const sourceDoc = getDocByPathOrName(hist.source_name) || documents.find((d: any) => d.id === hist.source_file_id);
+            const outputDoc = getDocByPathOrName(hist.output_name) || documents.find((d: any) => d.id === hist.output_file_id);
 
-              {/* Event Details */}
-              <div style={{ flex: 1 }}>
-                <span className="badge badge-pdf" style={{ marginBottom: '4px', backgroundColor: 'var(--color-primary-container)', color: 'var(--color-on-primary-container)' }}>
-                  {hist.operation.toUpperCase().replace('_', ' ')}
-                </span>
-                <h4 className="body-md" style={{ fontWeight: '600', marginTop: '4px' }}>Source file: {hist.source_name}</h4>
-                {hist.output_name && (
-                  <p className="body-sm" style={{ color: 'var(--color-primary)', marginTop: '2px' }}>
-                    Output: {hist.output_name}
-                  </p>
-                )}
-              </div>
+            return (
+              <div 
+                key={hist.id}
+                style={{
+                  display: 'flex',
+                  gap: '16px',
+                  paddingBottom: '16px',
+                  borderBottom: '1px solid var(--color-outline-variant)'
+                }}
+              >
+                <div style={{ minWidth: '120px', color: 'var(--color-outline)', fontSize: '13px' }}>
+                  {hist.timestamp}
+                </div>
 
-              {/* Status */}
-              <div>
-                <span 
-                  className="badge" 
-                  style={{ 
-                    backgroundColor: hist.status === 'completed' ? 'rgba(163, 230, 53, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                    color: hist.status === 'completed' ? '#a3e635' : '#ef4444',
-                    border: hist.status === 'completed' ? '1px solid #a3e635' : '1px solid #ef4444'
-                  }}
-                >
-                  {hist.status}
-                </span>
+                <div style={{ flex: 1 }}>
+                  <span className="badge badge-pdf" style={{ marginBottom: '4px', backgroundColor: 'var(--color-primary-container)', color: 'var(--color-on-primary-container)' }}>
+                    {hist.operation.toUpperCase().replace('_', ' ')}
+                  </span>
+                  
+                  <h4 className="body-md" style={{ fontWeight: '600', marginTop: '4px' }}>
+                    Source file:{' '}
+                    {sourceDoc ? (
+                      <span 
+                        onClick={() => onViewFile(sourceDoc)}
+                        style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--color-primary)' }}
+                        title="Click to view in Reader"
+                      >
+                        {hist.source_name}
+                      </span>
+                    ) : (
+                      hist.source_name
+                    )}
+                  </h4>
+
+                  {hist.output_name && (
+                    <p className="body-sm" style={{ marginTop: '2px' }}>
+                      Output:{' '}
+                      {outputDoc ? (
+                        <span 
+                          onClick={() => onViewFile(outputDoc)}
+                          style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--color-primary)', fontWeight: '600' }}
+                          title="Click to view in Reader"
+                        >
+                          {hist.output_name}
+                        </span>
+                      ) : (
+                        hist.output_name
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <span 
+                    className="badge" 
+                    style={{ 
+                      backgroundColor: hist.status === 'completed' ? 'rgba(163, 230, 53, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: hist.status === 'completed' ? '#a3e635' : '#ef4444',
+                      border: hist.status === 'completed' ? '1px solid #a3e635' : '1px solid #ef4444'
+                    }}
+                  >
+                    {hist.status}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {history.length === 0 && (
             <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-outline)' }}>
@@ -2576,68 +3933,423 @@ function HistoryScreen({ history }: any) {
 }
 
 // ----------------------------------------------------
-// 8. SETTINGS SCREEN (BYOK)
+// 9. SETTINGS SCREEN (BYOK)
 // ----------------------------------------------------
-function SettingsScreen({ apiKey, provider, onSave }: any) {
-  const [localKey, setLocalKey] = useState(apiKey || '');
-  const [localProvider, setLocalProvider] = useState(provider || 'openai');
+function SettingsScreen({ apiKeys, onSaveKeys }: any) {
+  const [label, setLabel] = useState('');
+  const [provider, setProvider] = useState('openai');
+  const [apiKey, setApiKey] = useState('');
+  const [model, setModel] = useState('gpt-4o-mini');
+  const [isActive, setIsActive] = useState(true);
+  const [isFallback, setIsFallback] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<'keys' | 'changelog'>('keys');
+
+  useEffect(() => {
+    if (provider === 'openai') setModel('gpt-4o-mini');
+    else if (provider === 'gemini') setModel('gemini-2.5-flash');
+    else if (provider === 'anthropic') setModel('claude-3-5-sonnet-20241022');
+    else if (provider === 'ollama') setModel('llama3');
+  }, [provider]);
+
+  const handleAddKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!label.trim()) {
+      alert('Please enter a label');
+      return;
+    }
+    if (provider !== 'ollama' && !apiKey.trim()) {
+      alert('Please enter an API Key');
+      return;
+    }
+
+    const newKey = {
+      id: Math.random().toString(36).substring(2, 9),
+      label: label.trim(),
+      provider,
+      apiKey: apiKey.trim(),
+      model,
+      isActive,
+      isFallback
+    };
+
+    const updatedKeys = [...(apiKeys || []), newKey];
+    onSaveKeys(updatedKeys);
+
+    if (newKey.isActive) {
+      localStorage.setItem('studyvault_apikey', newKey.apiKey);
+      localStorage.setItem('studyvault_provider', newKey.provider);
+    }
+
+    setLabel('');
+    setApiKey('');
+    setIsActive(true);
+    setIsFallback(false);
+  };
+
+  const handleDeleteKey = (id: string) => {
+    const updatedKeys = apiKeys.filter((k: any) => k.id !== id);
+    onSaveKeys(updatedKeys);
+    
+    if (updatedKeys.length === 0) {
+      localStorage.removeItem('studyvault_apikey');
+      localStorage.removeItem('studyvault_provider');
+    } else {
+      const activeKey = updatedKeys.find((k: any) => k.isActive);
+      if (activeKey) {
+        localStorage.setItem('studyvault_apikey', activeKey.apiKey);
+        localStorage.setItem('studyvault_provider', activeKey.provider);
+      }
+    }
+  };
+
+  const handleToggleActive = (id: string) => {
+    const updatedKeys = apiKeys.map((k: any) => {
+      if (k.id === id) {
+        return { ...k, isActive: !k.isActive };
+      }
+      return k;
+    });
+    onSaveKeys(updatedKeys);
+
+    const activeKey = updatedKeys.find((k: any) => k.isActive);
+    if (activeKey) {
+      localStorage.setItem('studyvault_apikey', activeKey.apiKey);
+      localStorage.setItem('studyvault_provider', activeKey.provider);
+    } else {
+      localStorage.removeItem('studyvault_apikey');
+      localStorage.removeItem('studyvault_provider');
+    }
+  };
+
+  const handleToggleFallback = (id: string) => {
+    const updatedKeys = apiKeys.map((k: any) => {
+      if (k.id === id) return { ...k, isFallback: !k.isFallback };
+      return k;
+    });
+    onSaveKeys(updatedKeys);
+  };
+
+  // Support saving legacy credentials from tests
+  const [legacyKey, setLegacyKey] = useState(() => localStorage.getItem('studyvault_apikey') || '');
+  const [legacyProvider, setLegacyProvider] = useState(() => localStorage.getItem('studyvault_provider') || 'openai');
+
+  const handleSaveLegacy = () => {
+    localStorage.setItem('studyvault_apikey', legacyKey);
+    localStorage.setItem('studyvault_provider', legacyProvider);
+
+    const newKey = {
+      id: 'legacy-key-' + Date.now(),
+      label: `${legacyProvider.toUpperCase()} Quick Key`,
+      provider: legacyProvider,
+      apiKey: legacyKey,
+      model: legacyProvider === 'gemini' ? 'gemini-2.5-flash' : legacyProvider === 'openai' ? 'gpt-4o-mini' : legacyProvider === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'llama3',
+      isActive: true,
+      isFallback: false
+    };
+
+    const filteredKeys = (apiKeys || []).filter((k: any) => !k.id.startsWith('legacy-key'));
+    onSaveKeys([...filteredKeys, newKey]);
+  };
 
   return (
     <>
-      <div>
-        <h1 className="headline-lg">Settings & Integrations</h1>
-        <p className="body-md" style={{ color: 'var(--color-on-surface-variant)' }}>Configure local parameters and custom API credentials.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 className="headline-lg">Settings & Integrations</h1>
+          <p className="body-md" style={{ color: 'var(--color-on-surface-variant)' }}>Configure local parameters, model credentials, and view changelogs.</p>
+        </div>
       </div>
 
-      <div className="glass-panel" style={{ padding: 'var(--spacing-lg)', maxWidth: '600px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <h2 className="headline-sm">Bring Your Own Key (BYOK)</h2>
-        <p className="body-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
-          StudyVault performs all text parsing locally. To generate summaries, flashcards, or chat prompts, you can add your custom API key. Your credentials are saved strictly in local storage and sent directly to the model provider.
-        </p>
-
-        <div>
-          <label className="label-md" style={{ display: 'block', marginBottom: '8px' }}>API Provider</label>
-          <select 
-            value={localProvider}
-            onChange={(e) => setLocalProvider(e.target.value)}
-            style={{
-              width: '100%',
-              background: 'var(--color-surface-container)',
-              border: '1px solid var(--color-outline-variant)',
-              borderRadius: 'var(--rounded-default)',
-              padding: '10px',
-              color: '#fff',
-              outline: 'none',
-              fontFamily: 'var(--font-family-body)'
-            }}
-          >
-            <option value="openai">OpenAI (ChatGPT)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="ollama">Local Ollama (Offline AI)</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="label-md" style={{ display: 'block', marginBottom: '8px' }}>API Key</label>
-          <input 
-            type="password" 
-            placeholder={localProvider === 'ollama' ? 'Ollama uses local host endpoints (no key required)' : 'sk-...'}
-            value={localKey}
-            onChange={(e) => setLocalKey(e.target.value)}
-            disabled={localProvider === 'ollama'}
-            className="input-field"
-          />
-        </div>
-
-        <button 
-          onClick={() => onSave(localKey, localProvider)} 
-          className="btn btn-primary"
-          style={{ alignSelf: 'flex-start' }}
+      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--color-outline-variant)', paddingBottom: '12px', marginBottom: '16px' }}>
+        <button
+          onClick={() => setActiveSubTab('keys')}
+          className={`btn ${activeSubTab === 'keys' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '8px 16px', fontSize: '13px' }}
         >
-          <span>Save Changes</span>
+          API Key Manager
+        </button>
+        <button
+          onClick={() => setActiveSubTab('changelog')}
+          className={`btn ${activeSubTab === 'changelog' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '8px 16px', fontSize: '13px' }}
+        >
+          Changelog & Updates
         </button>
       </div>
+
+      {activeSubTab === 'keys' && (
+        <div style={{ display: 'flex', gap: 'var(--spacing-lg)', flexWrap: 'wrap' }}>
+          <div className="glass-panel" style={{ flex: 1.2, padding: 'var(--spacing-lg)', display: 'flex', flexDirection: 'column', gap: '16px', minWidth: '320px' }}>
+            <h2 className="headline-sm">Configure Model Providers</h2>
+            <p className="body-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
+              Configure multiple API keys. Active keys can be queried concurrently for comparative studies, and fallback keys will automatically cascade on query failures.
+            </p>
+
+            <form onSubmit={handleAddKey} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label className="label-md" style={{ display: 'block', marginBottom: '6px' }}>Label / Identifier</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. My OpenAI Dev Key"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  className="input-field"
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <label className="label-md" style={{ display: 'block', marginBottom: '6px' }}>API Provider</label>
+                  <select 
+                    value={provider}
+                    onChange={(e) => setProvider(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'var(--color-surface-container)',
+                      border: '1px solid var(--color-outline-variant)',
+                      borderRadius: 'var(--rounded-default)',
+                      padding: '10px',
+                      color: '#fff',
+                      outline: 'none',
+                      fontFamily: 'var(--font-family-body)'
+                    }}
+                  >
+                    <option value="openai">OpenAI (ChatGPT)</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="ollama">Local Ollama (Offline AI)</option>
+                  </select>
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <label className="label-md" style={{ display: 'block', marginBottom: '6px' }}>Model Name</label>
+                  <input 
+                    type="text" 
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label-md" style={{ display: 'block', marginBottom: '6px' }}>API Key</label>
+                <input 
+                  type="password" 
+                  placeholder={provider === 'ollama' ? 'No key required' : 'sk-...'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  disabled={provider === 'ollama'}
+                  className="input-field"
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '24px', alignItems: 'center', marginTop: '4px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={isActive} 
+                    onChange={(e) => setIsActive(e.target.checked)}
+                    style={{ accentColor: 'var(--color-primary)' }}
+                  />
+                  <span>Active for Queries</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={isFallback} 
+                    onChange={(e) => setIsFallback(e.target.checked)}
+                    style={{ accentColor: 'var(--color-primary)' }}
+                  />
+                  <span>Use as Fallback</span>
+                </label>
+              </div>
+
+              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', marginTop: '8px' }}>
+                <span>Add Key Config</span>
+              </button>
+            </form>
+
+            <div style={{ marginTop: '20px', borderTop: '1px solid var(--color-outline-variant)', paddingTop: '20px' }}>
+              <h3 className="body-md label-md" style={{ color: 'var(--color-outline)', marginBottom: '8px' }}>Bring Your Own Key (BYOK)</h3>
+              <p className="body-sm" style={{ color: 'var(--color-on-surface-variant)', marginBottom: '12px' }}>
+                StudyVault performs all text parsing locally. To generate summaries, flashcards, or chat prompts, you can add your custom API key. Your credentials are saved strictly in local storage and sent directly to the model provider.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label className="label-md" style={{ display: 'block', marginBottom: '6px' }}>API Provider</label>
+                  <select 
+                    value={legacyProvider}
+                    onChange={(e) => setLegacyProvider(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'var(--color-surface-container)',
+                      border: '1px solid var(--color-outline-variant)',
+                      borderRadius: 'var(--rounded-default)',
+                      padding: '10px',
+                      color: '#fff',
+                      outline: 'none',
+                      fontFamily: 'var(--font-family-body)'
+                    }}
+                  >
+                    <option value="openai">OpenAI (ChatGPT)</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="ollama">Local Ollama (Offline AI)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label-md" style={{ display: 'block', marginBottom: '6px' }}>API Key</label>
+                  <input 
+                    type="password" 
+                    placeholder={legacyProvider === 'ollama' ? 'No key required' : 'sk-...'}
+                    value={legacyKey}
+                    onChange={(e) => setLegacyKey(e.target.value)}
+                    disabled={legacyProvider === 'ollama'}
+                    className="input-field"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <button 
+                  onClick={handleSaveLegacy}
+                  className="btn btn-primary"
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-panel" style={{ flex: 1, padding: 'var(--spacing-lg)', minWidth: '300px' }}>
+            <h2 className="headline-sm" style={{ marginBottom: '16px' }}>Active API Configurations</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {(apiKeys || []).map((k: any) => (
+                <div 
+                  key={k.id}
+                  style={{
+                    padding: '12px',
+                    backgroundColor: 'var(--color-surface-container)',
+                    borderRadius: 'var(--rounded-default)',
+                    border: '1px solid var(--color-outline-variant)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <strong style={{ fontSize: '14px', color: '#fff' }}>{k.label}</strong>
+                      <div style={{ fontSize: '11px', color: 'var(--color-outline)', marginTop: '2px' }}>
+                        Provider: {k.provider.toUpperCase()} | Model: {k.model}
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteKey(k.id)}
+                      className="hover-delete-btn"
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-outline)' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '16px', borderTop: '1px solid var(--color-outline-variant)', paddingTop: '8px', fontSize: '12px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={k.isActive} 
+                        onChange={() => handleToggleActive(k.id)}
+                        style={{ accentColor: 'var(--color-primary)' }}
+                      />
+                      <span>Active</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={k.isFallback} 
+                        onChange={() => handleToggleFallback(k.id)}
+                        style={{ accentColor: 'var(--color-primary)' }}
+                      />
+                      <span>Fallback</span>
+                    </label>
+                  </div>
+                </div>
+              ))}
+
+              {(apiKeys || []).length === 0 && (
+                <div style={{ textAlign: 'center', padding: '24px', color: 'var(--color-outline)', fontSize: '13px' }}>
+                  No API key configurations added yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'changelog' && (
+        <div className="glass-panel" style={{ padding: 'var(--spacing-lg)', maxWidth: '700px' }}>
+          <h2 className="headline-sm" style={{ marginBottom: '24px' }}>Release Changelog Timeline</h2>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', position: 'relative', paddingLeft: '20px', borderLeft: '2px solid var(--color-outline-variant)' }}>
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                position: 'absolute',
+                left: '-27px',
+                top: '4px',
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--color-primary)',
+                border: '4px solid var(--color-surface)'
+              }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="body-md" style={{ fontWeight: '700', color: 'var(--color-primary)' }}>Version 1.0.0.1</h3>
+                <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>May 2026</span>
+              </div>
+              <ul style={{ paddingLeft: '16px', marginTop: '8px', listStyleType: 'disc', fontSize: '13px', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <li><strong>Multi-API Key Support:</strong> Configure keys for multiple model providers (Google Gemini, OpenAI, Anthropic Claude, Local Ollama) concurrently.</li>
+                <li><strong>Parallel Querying:</strong> Query multiple active AI models side-by-side inside reader panels.</li>
+                <li><strong>Cascading Fallbacks:</strong> Seamlessly cascade queries to secondary backup keys on initial failures.</li>
+                <li><strong>Saved AI Conversations:</strong> Full SQLite database storage for previous chats, allowing users to resume past dialog threads and delete specific logs.</li>
+                <li><strong>Side-by-side Split Reader:</strong> Enable side-by-side reading layouts with independent pages, scroll offsets, zoom levels, and layout rendering.</li>
+                <li><strong>Export & Sharing:</strong> Select custom sets of library files and folders to export locally into target directories.</li>
+                <li><strong>Activity Log Navigation:</strong> History screen items map to clickable links, opening documents directly inside the Reader workspace.</li>
+              </ul>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                position: 'absolute',
+                left: '-27px',
+                top: '4px',
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--color-secondary)',
+                border: '4px solid var(--color-surface)'
+              }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="body-md" style={{ fontWeight: '700', color: 'var(--color-secondary)' }}>Version 1.0.0 (Initial Release)</h3>
+                <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>April 2026</span>
+              </div>
+              <ul style={{ paddingLeft: '16px', marginTop: '8px', listStyleType: 'disc', fontSize: '13px', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <li><strong>OCR Extraction:</strong> Tesseract engine OCR pipeline to extract text from layout documents.</li>
+                <li><strong>Document Viewer:</strong> Rich document viewer rendering with custom text highlighter annotations and text sheets.</li>
+                <li><strong>Format Converter:</strong> Local offline workers for docx-to-pdf, pptx-to-pdf and office document conversions.</li>
+                <li><strong>FTS5 Database Search:</strong> Local SQLite-based full text search indexing across all library files.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

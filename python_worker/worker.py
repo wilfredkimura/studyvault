@@ -241,8 +241,28 @@ def process_ai_query(args):
             res_data = res.json()
             response_text = res_data['response']
             
+        elif provider == 'anthropic':
+            if not resolved_model:
+                resolved_model = 'claude-3-5-sonnet-20241022'
+            url = "https://api.anthropic.com/v1/messages"
+            headers = {
+                "content-type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            }
+            payload = {
+                "model": resolved_model,
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=30)
+            res.raise_for_status()
+            res_data = res.json()
+            response_text = res_data['content'][0]['text']
+            
         else:
             response_text = f"[StudyVault AI Node - Direct API connection established for {provider}]\nParsed query successfully (fallback mock)."
+
             
         # Cache the successful response
         try:
@@ -338,6 +358,16 @@ def main():
                 data = db.get_ai_cache(args['hash'])
             elif command == 'db_save_ai_cache':
                 data = db.save_ai_cache(args['cache'])
+            elif command == 'db_get_ai_chats':
+                data = db.get_ai_chats(args.get('file_id'))
+            elif command == 'db_create_ai_chat':
+                data = db.create_ai_chat(args['chat_id'], args['title'], args.get('file_id'))
+            elif command == 'db_delete_ai_chat':
+                data = db.delete_ai_chat(args['chat_id'])
+            elif command == 'db_get_ai_messages':
+                data = db.get_ai_messages(args['chat_id'])
+            elif command == 'db_add_ai_message':
+                data = db.add_ai_message(args['msg_id'], args['chat_id'], args['role'], args['content'])
             else:
                 raise ValueError(f"Unknown command: {command}")
             

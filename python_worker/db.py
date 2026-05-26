@@ -63,6 +63,22 @@ CREATE TABLE IF NOT EXISTS ai_cache (
   timestamp TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS ai_chats (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  file_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES ai_chats(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  timestamp TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+
 CREATE TABLE IF NOT EXISTS reading_progress (
   file_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
   last_page INTEGER NOT NULL DEFAULT 1,
@@ -375,3 +391,40 @@ def save_ai_cache(cache):
     """, (cache['id'], cache['input_hash'], cache['response'], cache['model']))
     conn.commit()
     return True
+
+def get_ai_chats(file_id=None):
+    conn = get_conn()
+    cur = conn.cursor()
+    if file_id is not None:
+        cur.execute("SELECT * FROM ai_chats WHERE file_id = ? ORDER BY created_at DESC", (file_id,))
+    else:
+        cur.execute("SELECT * FROM ai_chats ORDER BY created_at DESC")
+    return cur.fetchall()
+
+def create_ai_chat(chat_id, title, file_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO ai_chats (id, title, file_id) VALUES (?, ?, ?)", (chat_id, title, file_id))
+    conn.commit()
+    return True
+
+def delete_ai_chat(chat_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM ai_chats WHERE id = ?", (chat_id,))
+    conn.commit()
+    return True
+
+def get_ai_messages(chat_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM ai_messages WHERE chat_id = ? ORDER BY timestamp ASC", (chat_id,))
+    return cur.fetchall()
+
+def add_ai_message(msg_id, chat_id, role, content):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO ai_messages (id, chat_id, role, content) VALUES (?, ?, ?, ?)", (msg_id, chat_id, role, content))
+    conn.commit()
+    return True
+

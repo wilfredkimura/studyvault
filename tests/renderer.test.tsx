@@ -16,8 +16,8 @@ describe('React Frontend UI Component', () => {
     expect(screen.getByText('Library')).toBeInTheDocument();
     expect(screen.getByText('Reader')).toBeInTheDocument();
     expect(screen.getByText('Converter')).toBeInTheDocument();
-    expect(screen.getByText('Deep Search')).toBeInTheDocument();
-    expect(screen.getByText('AI Copilot')).toBeInTheDocument();
+    expect(screen.getByText('Content Search')).toBeInTheDocument();
+    expect(screen.getByText('Study Assistant')).toBeInTheDocument();
     expect(screen.getByText('History')).toBeInTheDocument();
   });
 
@@ -69,16 +69,19 @@ describe('React Frontend UI Component', () => {
     expect(screen.getByText('Bring Your Own Key (BYOK)')).toBeInTheDocument();
 
     // Select provider
-    const providerSelect = screen.getByRole('combobox');
+    const comboboxes = screen.getAllByRole('combobox');
+    const providerSelect = comboboxes[comboboxes.length - 1];
     fireEvent.change(providerSelect, { target: { value: 'gemini' } });
     expect(providerSelect).toHaveValue('gemini');
 
     // Input api key
-    const apiKeyInput = screen.getByPlaceholderText('sk-...');
+    const apiKeyInputs = screen.getAllByPlaceholderText('sk-...');
+    const apiKeyInput = apiKeyInputs[apiKeyInputs.length - 1];
     fireEvent.change(apiKeyInput, { target: { value: 'testkey-12345' } });
 
     // Click save
-    const saveBtn = screen.getByRole('button', { name: /Save Changes/i });
+    const saveButtons = screen.getAllByRole('button', { name: /Save Changes/i });
+    const saveBtn = saveButtons[saveButtons.length - 1];
     fireEvent.click(saveBtn);
 
     // Verify notification is displayed or key is stored in localStorage

@@ -34,6 +34,16 @@ export interface StudyVaultAPI {
   getAiCache: (hash: string) => Promise<any>;
   saveAiCache: (cache: { id: string; input_hash: string; response: string; model: string }) => Promise<any>;
 
+  // AI Chat History
+  getAiChats: (fileId?: string) => Promise<any[]>;
+  createAiChat: (chatId: string, title: string, fileId: string | null) => Promise<any>;
+  deleteAiChat: (chatId: string) => Promise<any>;
+  getAiMessages: (chatId: string) => Promise<any[]>;
+  addAiMessage: (msg: { id: string; chat_id: string; role: string; content: string }) => Promise<any>;
+
+  // Document sharing
+  shareDocuments: (filePaths: string[], destDir: string) => Promise<boolean>;
+
   // Worker commands (OCR, Conversion, AI pipeline)
   runWorkerCommand: (command: string, args: any) => Promise<any>;
 
@@ -81,6 +91,16 @@ const api: StudyVaultAPI = {
   // AI Caching
   getAiCache: (hash) => ipcRenderer.invoke('db:get-ai-cache', hash),
   saveAiCache: (cache) => ipcRenderer.invoke('db:save-ai-cache', cache),
+
+  // AI Chat History
+  getAiChats: (fileId) => ipcRenderer.invoke('db:get-ai-chats', fileId),
+  createAiChat: (chatId, title, fileId) => ipcRenderer.invoke('db:create-ai-chat', chatId, title, fileId),
+  deleteAiChat: (chatId) => ipcRenderer.invoke('db:delete-ai-chat', chatId),
+  getAiMessages: (chatId) => ipcRenderer.invoke('db:get-ai-messages', chatId),
+  addAiMessage: (msg) => ipcRenderer.invoke('db:add-ai-message', msg),
+
+  // Document sharing
+  shareDocuments: (filePaths, destDir) => ipcRenderer.invoke('files:share-export', filePaths, destDir),
 
   // Python Worker
   runWorkerCommand: (command, args) => ipcRenderer.invoke('worker:run-command', command, args),

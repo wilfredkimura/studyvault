@@ -101,6 +101,26 @@ export const dbService = {
 
   updateDocumentName: (id: string, name: string) => {
     return pythonWorker.sendCommand('db_update_document_name', { id, name });
+  },
+
+  getAiChats: (fileId?: string) => {
+    return pythonWorker.sendCommand('db_get_ai_chats', { file_id: fileId });
+  },
+
+  createAiChat: (chatId: string, title: string, fileId: string | null) => {
+    return pythonWorker.sendCommand('db_create_ai_chat', { chat_id: chatId, title, file_id: fileId });
+  },
+
+  deleteAiChat: (chatId: string) => {
+    return pythonWorker.sendCommand('db_delete_ai_chat', { chat_id: chatId });
+  },
+
+  getAiMessages: (chatId: string) => {
+    return pythonWorker.sendCommand('db_get_ai_messages', { chat_id: chatId });
+  },
+
+  addAiMessage: (msg: { id: string; chat_id: string; role: string; content: string }) => {
+    return pythonWorker.sendCommand('db_add_ai_message', { msg_id: msg.id, chat_id: msg.chat_id, role: msg.role, content: msg.content });
   }
 };
 export default dbService;
