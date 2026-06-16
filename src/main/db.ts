@@ -103,6 +103,18 @@ export const dbService = {
     return pythonWorker.sendCommand('db_update_document_name', { id, name });
   },
 
+  getProviderModels: (provider: string, apiKey: string) => {
+    return pythonWorker.sendCommand('ai_get_models', { provider, api_key: apiKey });
+  },
+
+  refreshProviderModels: (provider: string, apiKey: string) => {
+    return pythonWorker.sendCommand('refresh_provider_models', { provider_id: provider, api_key: apiKey });
+  },
+
+  updateDocumentContent: (id: string, content: string) => {
+    return pythonWorker.sendCommand('db_update_document_content', { id, content });
+  },
+
   getAiChats: (fileId?: string) => {
     return pythonWorker.sendCommand('db_get_ai_chats', { file_id: fileId });
   },

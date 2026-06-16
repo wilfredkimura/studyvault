@@ -447,3 +447,36 @@ body {
   background-color: #f1707a;
   color: white;
 }
+
+/* Responsiveness Media Queries */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 72px;
+    --spacing-lg: 16px;
+    --gutter: 16px;
+  }
+  
+  .sidebar .nav-item span {
+    display: none;
+  }
+  
+  .sidebar .nav-item {
+    justify-content: center;
+    padding: var(--spacing-md);
+  }
+  
+  .sidebar {
+    align-items: center;
+  }
+  
+  .workspace {
+    height: calc(100vh - var(--titlebar-height));
+  }
+}
+
+.share-option-hover:hover {
+  background-color: var(--color-surface-container-high) !important;
+  border-color: var(--color-primary) !important;
+}
+
+

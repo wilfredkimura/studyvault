@@ -33,6 +33,9 @@ export interface StudyVaultAPI {
   // AI Response Cache
   getAiCache: (hash: string) => Promise<any>;
   saveAiCache: (cache: { id: string; input_hash: string; response: string; model: string }) => Promise<any>;
+  getProviderModels: (provider: string, apiKey: string) => Promise<any>;
+  refreshProviderModels: (provider: string, apiKey: string) => Promise<any>;
+  updateDocumentContent: (id: string, content: string) => Promise<any>;
 
   // AI Chat History
   getAiChats: (fileId?: string) => Promise<any[]>;
@@ -43,6 +46,7 @@ export interface StudyVaultAPI {
 
   // Document sharing
   shareDocuments: (filePaths: string[], destDir: string) => Promise<boolean>;
+  shareNative: (filePaths: string[]) => Promise<boolean>;
 
   // Worker commands (OCR, Conversion, AI pipeline)
   runWorkerCommand: (command: string, args: any) => Promise<any>;
@@ -91,6 +95,9 @@ const api: StudyVaultAPI = {
   // AI Caching
   getAiCache: (hash) => ipcRenderer.invoke('db:get-ai-cache', hash),
   saveAiCache: (cache) => ipcRenderer.invoke('db:save-ai-cache', cache),
+  getProviderModels: (provider, apiKey) => ipcRenderer.invoke('db:get-provider-models', provider, apiKey),
+  refreshProviderModels: (provider, apiKey) => ipcRenderer.invoke('db:refresh-provider-models', provider, apiKey),
+  updateDocumentContent: (id, content) => ipcRenderer.invoke('db:update-document-content', id, content),
 
   // AI Chat History
   getAiChats: (fileId) => ipcRenderer.invoke('db:get-ai-chats', fileId),
@@ -101,6 +108,7 @@ const api: StudyVaultAPI = {
 
   // Document sharing
   shareDocuments: (filePaths, destDir) => ipcRenderer.invoke('files:share-export', filePaths, destDir),
+  shareNative: (filePaths) => ipcRenderer.invoke('files:share-native', filePaths),
 
   // Python Worker
   runWorkerCommand: (command, args) => ipcRenderer.invoke('worker:run-command', command, args),

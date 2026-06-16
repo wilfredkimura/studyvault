@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS reading_progress (
   updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS provider_models (
+  provider TEXT PRIMARY KEY,
+  models_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
   id UNINDEXED,
   name,
@@ -427,4 +433,36 @@ def add_ai_message(msg_id, chat_id, role, content):
     cur.execute("INSERT INTO ai_messages (id, chat_id, role, content) VALUES (?, ?, ?, ?)", (msg_id, chat_id, role, content))
     conn.commit()
     return True
+
+def save_provider_models(provider, models):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT OR REPLACE INTO provider_models (provider, models_json, updated_at)
+        VALUES (?, ?, datetime('now', 'localtime'))
+    """, (provider, json.dumps(models)))
+    conn.commit()
+    return True
+
+def get_provider_models(provider):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT models_json FROM provider_models WHERE provider = ?", (provider,))
+    row = cur.fetchone()
+    if row:
+        return json.loads(row['models_json'])
+    return None
+
+
+def update_document_content(doc_id, content):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE documents 
+        SET content_extracted = ?, updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+    """, (content, doc_id))
+    conn.commit()
+    return True
+
 

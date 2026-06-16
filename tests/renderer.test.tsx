@@ -70,8 +70,8 @@ describe('React Frontend UI Component', () => {
 
     // Select provider
     const comboboxes = screen.getAllByRole('combobox');
-    const providerSelect = comboboxes[comboboxes.length - 1];
-    fireEvent.change(providerSelect, { target: { value: 'gemini' } });
+    const providerSelect = comboboxes.filter(el => el.tagName === 'SELECT').pop();
+    fireEvent.change(providerSelect!, { target: { value: 'gemini' } });
     expect(providerSelect).toHaveValue('gemini');
 
     // Input api key

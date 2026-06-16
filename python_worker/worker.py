@@ -6,6 +6,14 @@ import time
 import os
 import db
 import converter
+import asyncio
+import httpx
+import re
+import threading
+
+# Initialize background loop and queue placeholders (moved below worker definitions)
+bg_loop = None
+task_queue = None
 
 def generate_hash(content: str) -> str:
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
@@ -285,6 +293,193 @@ def process_ai_query(args):
         "cached": False
     }
 
+def get_fallback_models(provider):
+    if provider == 'openai':
+        return [
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "context_window": 128000, "provider": "openai"},
+            {"id": "gpt-4o", "name": "GPT-4o", "context_window": 128000, "provider": "openai"},
+            {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "context_window": 128000, "provider": "openai"}
+        ]
+    elif provider == 'gemini':
+        return [
+            {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "context_window": 1048576, "provider": "gemini"},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "context_window": 2097152, "provider": "gemini"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "context_window": 1048576, "provider": "gemini"}
+        ]
+    elif provider == 'anthropic':
+        return [
+            {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "context_window": 200000, "provider": "anthropic"},
+            {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "context_window": 200000, "provider": "anthropic"}
+        ]
+    elif provider == 'openrouter':
+        return [
+            {"id": "meta-llama/llama-3-8b-instruct", "name": "Llama 3 8B", "context_window": 8192, "provider": "openrouter"}
+        ]
+    elif provider == 'ollama':
+        return [
+            {"id": "llama3", "name": "Llama 3", "context_window": 8192, "provider": "ollama"},
+            {"id": "mistral", "name": "Mistral", "context_window": 8192, "provider": "ollama"}
+        ]
+    return []
+
+async def fetch_openai_models(api_key):
+    url = "https://api.openai.com/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        res = await client.get(url, headers=headers)
+        res.raise_for_status()
+        data = res.json()
+        models = []
+        for m in data.get('data', []):
+            m_id = m['id']
+            if m_id.startswith('gpt-') or m_id.startswith('o1-'):
+                context = 128000
+                if m_id == 'gpt-4':
+                    context = 8192
+                models.append({
+                    "id": m_id,
+                    "name": m_id.replace('-', ' ').title(),
+                    "context_window": context,
+                    "provider": "openai"
+                })
+        return sorted(models, key=lambda x: x['id'])
+
+async def fetch_anthropic_models(api_key):
+    url = "https://api.anthropic.com/v1/models"
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01"
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        res = await client.get(url, headers=headers)
+        res.raise_for_status()
+        data = res.json()
+        models = []
+        for m in data.get('data', []):
+            models.append({
+                "id": m['id'],
+                "name": m.get('display_name') or m['id'].replace('-', ' ').title(),
+                "context_window": 200000,
+                "provider": "anthropic"
+            })
+        return sorted(models, key=lambda x: x['id'])
+
+async def fetch_gemini_models(api_key):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            res = await client.get(url)
+            res.raise_for_status()
+        except Exception as e:
+            err_msg = str(e)
+            err_msg = re.sub(r'key=[a-zA-Z0-9_-]+', 'key=REDACTED', err_msg)
+            raise RuntimeError(f"Gemini API request failed: {err_msg}") from None
+            
+        data = res.json()
+        models = []
+        for m in data.get('models', []):
+            methods = m.get('supportedGenerationMethods', [])
+            if 'generateContent' in methods:
+                clean_id = m['name'].replace('models/', '')
+                context = m.get('inputTokenLimit', 1048576)
+                models.append({
+                    "id": clean_id,
+                    "name": clean_id.replace('-', ' ').title().replace('Gemini', 'Gemini '),
+                    "context_window": context,
+                    "provider": "gemini"
+                })
+        return sorted(models, key=lambda x: x['id'])
+
+async def fetch_openrouter_models():
+    url = "https://openrouter.ai/api/v1/models"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        res = await client.get(url)
+        res.raise_for_status()
+        data = res.json()
+        models = []
+        for m in data.get('data', []):
+            models.append({
+                "id": m['id'],
+                "name": m.get('name') or m['id'],
+                "context_window": m.get('context_length', 8192),
+                "provider": "openrouter"
+            })
+        return sorted(models, key=lambda x: x['id'])
+
+async def fetch_ollama_models():
+    url = "http://localhost:11434/api/tags"
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        res = await client.get(url)
+        res.raise_for_status()
+        data = res.json()
+        models = []
+        for m in data.get('models', []):
+            name = m['name']
+            models.append({
+                "id": name,
+                "name": name,
+                "context_window": 8192,
+                "provider": "ollama"
+            })
+        return sorted(models, key=lambda x: x['id'])
+
+async def execute_refresh_provider_models(user_id, provider_id, api_key):
+    is_mock = provider_id == 'mock' or (provider_id != 'ollama' and (not api_key or api_key.startswith('sk-mock') or api_key == 'testkey-12345'))
+    models = []
+    try:
+        if is_mock:
+            models = get_fallback_models(provider_id)
+        else:
+            if provider_id == 'openai':
+                models = await fetch_openai_models(api_key)
+            elif provider_id == 'gemini':
+                models = await fetch_gemini_models(api_key)
+            elif provider_id == 'anthropic':
+                models = await fetch_anthropic_models(api_key)
+            elif provider_id == 'openrouter':
+                models = await fetch_openrouter_models()
+            elif provider_id == 'ollama':
+                models = await fetch_ollama_models()
+    except Exception as e:
+        err_msg = str(e)
+        err_msg = re.sub(r'key=[a-zA-Z0-9_-]+', 'key=REDACTED', err_msg)
+        print(f"Error fetching models for {provider_id}, using fallback: {err_msg}", file=sys.stderr)
+        models = get_fallback_models(provider_id)
+        
+    if models:
+        db.save_provider_models(provider_id, models)
+    return models
+
+async def refresh_provider_models_worker():
+    while True:
+        task = await task_queue.get()
+        user_id = task.get('user_id')
+        provider_id = task.get('provider_id')
+        api_key = task.get('api_key')
+        try:
+            await execute_refresh_provider_models(user_id, provider_id, api_key)
+        except Exception as e:
+            print(f"Background refresh task error: {e}", file=sys.stderr)
+        finally:
+            task_queue.task_done()
+
+# Initialize background event loop for decoupled tasks after functions are defined
+bg_loop = asyncio.new_event_loop()
+def start_background_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+threading.Thread(target=start_background_loop, args=(bg_loop,), daemon=True).start()
+
+async def init_queue():
+    global task_queue
+    task_queue = asyncio.Queue()
+    asyncio.create_task(refresh_provider_models_worker())
+
+# Run initialization in background loop
+future = asyncio.run_coroutine_threadsafe(init_queue(), bg_loop)
+future.result() # Wait for it to initialize
+
 def main():
     # Loop indefinitely, reading from stdin, writing results to stdout
     while True:
@@ -311,6 +506,26 @@ def main():
                 data = process_render_pdf_page(args)
             elif command == 'ai_query':
                 data = process_ai_query(args)
+            elif command == 'ai_get_models':
+                provider = args.get('provider', 'mock')
+                api_key = args.get('api_key', '')
+                models = db.get_provider_models(provider)
+                if not models:
+                    future = asyncio.run_coroutine_threadsafe(
+                        execute_refresh_provider_models('default_user', provider, api_key),
+                        bg_loop
+                    )
+                    models = future.result()
+                data = models
+            elif command == 'refresh_provider_models':
+                user_id = args.get('user_id', 'default_user')
+                provider_id = args.get('provider_id')
+                api_key = args.get('api_key', '')
+                bg_loop.call_soon_threadsafe(
+                    task_queue.put_nowait,
+                    {"user_id": user_id, "provider_id": provider_id, "api_key": api_key}
+                )
+                data = {"status": "queued"}
             
             # SQLite DB Proxy Handlers
             elif command == 'db_init':
@@ -368,6 +583,13 @@ def main():
                 data = db.get_ai_messages(args['chat_id'])
             elif command == 'db_add_ai_message':
                 data = db.add_ai_message(args['msg_id'], args['chat_id'], args['role'], args['content'])
+            elif command == 'extract_text':
+                file_path = args.get('file_path', '')
+                file_type = args.get('file_type', '')
+                text, file_hash = extractor.extract_text_and_hash(file_path, file_type)
+                data = {"text": text, "hash": file_hash}
+            elif command == 'db_update_document_content':
+                data = db.update_document_content(args['id'], args['content'])
             else:
                 raise ValueError(f"Unknown command: {command}")
             

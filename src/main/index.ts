@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { initDatabase, dbService } from './db';
@@ -84,6 +84,9 @@ ipcMain.handle('db:add-history', async (_, record) => dbService.addHistoryRecord
 ipcMain.handle('db:get-ai-cache', async (_, hash) => dbService.getAiCache(hash));
 ipcMain.handle('db:save-ai-cache', async (_, cache) => dbService.saveAiCache(cache));
 ipcMain.handle('db:update-document-name', async (_, id, name) => dbService.updateDocumentName(id, name));
+ipcMain.handle('db:get-provider-models', async (_, provider, apiKey) => dbService.getProviderModels(provider, apiKey));
+ipcMain.handle('db:refresh-provider-models', async (_, provider, apiKey) => dbService.refreshProviderModels(provider, apiKey));
+ipcMain.handle('db:update-document-content', async (_, id, content) => dbService.updateDocumentContent(id, content));
 
 ipcMain.handle('db:get-ai-chats', async (_, fileId) => dbService.getAiChats(fileId));
 ipcMain.handle('db:create-ai-chat', async (_, chatId, title, fileId) => dbService.createAiChat(chatId, title, fileId));
@@ -106,6 +109,46 @@ ipcMain.handle('files:share-export', async (_, filePaths: string[], destDir: str
     return true;
   } catch (err) {
     console.error('Failed to export files:', err);
+    throw err;
+  }
+});
+
+// Windows Explorer Native Drag-and-Drop Sharing Handler
+ipcMain.handle('files:share-native', async (_, filePaths: string[]) => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const sharedDir = path.join(userDataPath, 'SharedDocs');
+    if (!fs.existsSync(sharedDir)) {
+      fs.mkdirSync(sharedDir, { recursive: true });
+    }
+
+    // Clear out old files first
+    const existingFiles = fs.readdirSync(sharedDir);
+    for (const f of existingFiles) {
+      try {
+        fs.unlinkSync(path.join(sharedDir, f));
+      } catch (e) {
+        // ignore if locked
+      }
+    }
+
+    const copiedFiles: string[] = [];
+    for (const filePath of filePaths) {
+      if (fs.existsSync(filePath)) {
+        const destPath = path.join(sharedDir, path.basename(filePath));
+        fs.copyFileSync(filePath, destPath);
+        copiedFiles.push(destPath);
+      }
+    }
+
+    if (copiedFiles.length > 0) {
+      // Highlight the first copied file in Windows Explorer
+      shell.showItemInFolder(copiedFiles[0]);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Failed native share folder opening:', err);
     throw err;
   }
 });
