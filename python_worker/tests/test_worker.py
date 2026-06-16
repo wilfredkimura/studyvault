@@ -58,3 +58,29 @@ def test_ai_query_with_key():
     assert "Direct API connection" in result["response"]
     assert result["model"] == "gpt-4o"
     assert result["cached"] is False
+
+def test_ai_query_rate_limit(monkeypatch):
+    import requests
+    class MockResponse:
+        status_code = 429
+        text = "Rate limit exceeded"
+        def json(self):
+            return {"error": "Rate limit exceeded"}
+        def raise_for_status(self):
+            raise requests.exceptions.HTTPError("429 Client Error: Too Many Requests", response=self)
+
+    def mock_post(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr(requests, "post", mock_post)
+
+    args = {
+        "provider": "openai",
+        "prompt": "Hello",
+        "api_key": "real-key-to-trigger-requests",
+        "model": "gpt-4o"
+    }
+    result = process_ai_query(args)
+    
+    assert result["rate_limit"] is True
+    assert "rate limit exceeded" in result["response"].lower()

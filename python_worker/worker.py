@@ -145,6 +145,16 @@ def process_render_pdf_page(args):
     img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{img_str}"
 
+def is_rate_limit_error(e):
+    import requests
+    if isinstance(e, requests.exceptions.HTTPError):
+        if e.response is not None and e.response.status_code == 429:
+            return True
+    err_str = str(e).lower()
+    if "rate limit" in err_str or "rate_limit" in err_str or "429" in err_str or "quota exceeded" in err_str:
+        return True
+    return False
+
 def process_ai_query(args):
     provider = args.get('provider', 'mock')
     prompt = args.get('prompt', '')
@@ -153,7 +163,7 @@ def process_ai_query(args):
     context = args.get('context', '')
     
     if not prompt:
-        return {"response": "Prompt cannot be empty.", "model": model or "default-model", "cached": False}
+        return {"response": "Prompt cannot be empty.", "model": model or "default-model", "cached": False, "rate_limit": False}
         
     if context:
         prompt = f"Context:\n{context}\n\nQuestion:\n{prompt}"
@@ -168,7 +178,8 @@ def process_ai_query(args):
             return {
                 "response": cached_res['response'],
                 "model": cached_res['model'],
-                "cached": True
+                "cached": True,
+                "rate_limit": False
             }
     except Exception as e:
         print(f"Cache check failed: {e}", file=sys.stderr)
@@ -185,7 +196,8 @@ def process_ai_query(args):
         return {
             "response": response,
             "model": model or "default-model",
-            "cached": False
+            "cached": False,
+            "rate_limit": False
         }
         
     # Perform actual REST request
@@ -193,6 +205,7 @@ def process_ai_query(args):
     
     response_text = ""
     resolved_model = model
+    is_rate_limit = False
     
     try:
         if provider == 'gemini':
@@ -270,7 +283,7 @@ def process_ai_query(args):
             
         else:
             response_text = f"[StudyVault AI Node - Direct API connection established for {provider}]\nParsed query successfully (fallback mock)."
-
+ 
             
         # Cache the successful response
         try:
@@ -285,12 +298,17 @@ def process_ai_query(args):
             print(f"Saving to cache failed: {e}", file=sys.stderr)
             
     except Exception as e:
-        response_text = f"AI query failed: {str(e)}"
+        if is_rate_limit_error(e):
+            response_text = "API rate limit exceeded. Please wait a moment before trying again."
+            is_rate_limit = True
+        else:
+            response_text = f"AI query failed: {str(e)}"
         
     return {
         "response": response_text,
         "model": resolved_model,
-        "cached": False
+        "cached": False,
+        "rate_limit": is_rate_limit
     }
 
 def get_fallback_models(provider):

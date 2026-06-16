@@ -154,7 +154,7 @@ export default function App() {
 
     // Dynamic OTA Update Check
     const checkUpdates = async () => {
-      const currentVersion = '1.0.4';
+      const currentVersion = '1.0.5';
       localStorage.setItem('studyvault_version', currentVersion);
 
       const isDismissed = localStorage.getItem('studyvault_ota_dismissed') === 'true';
@@ -235,7 +235,7 @@ export default function App() {
         currentStepIdx++;
       } else {
         clearInterval(interval);
-        const targetVer = latestUpdateInfo?.version || '1.0.4';
+        const targetVer = latestUpdateInfo?.version || '1.0.5';
         localStorage.setItem('studyvault_version', targetVer);
         localStorage.setItem('studyvault_ota_dismissed', 'true');
         setTimeout(() => {
@@ -613,6 +613,10 @@ export default function App() {
         context: contextText,
         model: primaryKey.model
       });
+      if (res.rate_limit) {
+        showNotification(`API Rate Limit Exceeded for ${primaryKey.label}. Please wait a moment before trying again.`, 'error');
+        throw new Error("API rate limit exceeded. Please wait a moment before trying again.");
+      }
       if (res.error || (res.response && res.response.startsWith('AI query failed'))) {
         throw new Error(res.error || res.response);
       }
@@ -682,7 +686,7 @@ export default function App() {
             </div>
 
             <p className="body-md">
-              StudyVault version <strong>v{latestUpdateInfo?.version || '1.0.4'}</strong> is ready (current version: v1.0.3).
+              StudyVault version <strong>v{latestUpdateInfo?.version || '1.0.5'}</strong> is ready (current version: v1.0.4).
             </p>
 
             <div style={{
@@ -694,7 +698,7 @@ export default function App() {
               maxHeight: '150px',
               overflowY: 'auto'
             }}>
-              <strong>What's New in v{latestUpdateInfo?.version || '1.0.4'}:</strong>
+              <strong>What's New in v{latestUpdateInfo?.version || '1.0.5'}:</strong>
               <ul style={{ paddingLeft: '16px', marginTop: '6px', listStyleType: 'disc', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {(latestUpdateInfo?.changelog || [
                   "Dynamic provider-centric model dropdown lists",
@@ -948,6 +952,7 @@ export default function App() {
                     documents={documents}
                     onSwitchFile={(doc) => handleViewFile(doc)}
                     apiKeys={apiKeys}
+                    showNotification={showNotification}
                   />
                 </div>
                 {isSplitScreen && (
@@ -977,6 +982,7 @@ export default function App() {
                         documents={documents}
                         onSwitchFile={(doc) => handleViewFileRight(doc)}
                         apiKeys={apiKeys}
+                        showNotification={showNotification}
                       />
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', backgroundColor: 'var(--color-surface-container-lowest)', borderRadius: 'var(--rounded-lg)', border: '1px dotted var(--color-outline-variant)', padding: '24px' }}>
@@ -1037,6 +1043,7 @@ export default function App() {
               documents={documents}
               apiKeys={apiKeys}
               runQueryWithFallback={runQueryWithFallback}
+              selectedFile={selectedFile}
             />
           )}
 
@@ -2214,7 +2221,7 @@ function PageImageSheet({ file, pageNum, scale }: { file: any, pageNum: number, 
 // ----------------------------------------------------
 // 3. DOCUMENT VIEWER SCREEN
 // ----------------------------------------------------
-function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh, isSplit, onToggleSplit, documents, onSwitchFile, apiKeys }: any) {
+function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh, isSplit, onToggleSplit, documents, onSwitchFile, apiKeys, showNotification }: any) {
   const [activeViewerTab, setActiveViewerTab] = useState<'notes' | 'ai' | 'outline'>('notes');
   const [selectedText, setSelectedText] = useState('');
   const [selectedTextPage, setSelectedTextPage] = useState(1);
@@ -2472,6 +2479,10 @@ function ViewerScreen({ file, annotations, progress, apiKey, provider, onRefresh
         context: contextText,
         model: primaryKey.model
       });
+      if (res.rate_limit) {
+        showNotification(`API Rate Limit Exceeded for ${primaryKey.label}. Please wait a moment before trying again.`, 'error');
+        throw new Error("API rate limit exceeded. Please wait a moment before trying again.");
+      }
       if (res.error || (res.response && res.response.startsWith('AI query failed'))) {
         throw new Error(res.error || res.response);
       }
@@ -3857,18 +3868,23 @@ function AssistantMessageBubble({ content }: { content: string }) {
 // ----------------------------------------------------
 // 7. STUDY ASSISTANT SCREEN
 // ----------------------------------------------------
-function StudyAssistantScreen({ documents, apiKeys, runQueryWithFallback }: any) {
-  const [selectedFileId, setSelectedFileId] = useState('');
+function StudyAssistantScreen({ documents, apiKeys, runQueryWithFallback, selectedFile }: any) {
+  const [selectedFileId, setSelectedFileId] = useState(selectedFile?.id || '');
   const [chatsList, setChatsList] = useState<any[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [promptInput, setPromptInput] = useState('');
   const [loadingAi, setLoadingAi] = useState(false);
 
+  // Sync to reader's selected document on mount/switch
+  useEffect(() => {
+    if (selectedFile && !activeChatId) {
+      setSelectedFileId(selectedFile.id);
+    }
+  }, [selectedFile]);
+
   useEffect(() => {
     loadChats();
-    setActiveChatId(null);
-    setChatMessages([]);
   }, [selectedFileId]);
 
   useEffect(() => {
@@ -3971,7 +3987,10 @@ function StudyAssistantScreen({ documents, apiKeys, runQueryWithFallback }: any)
       await window.api.addAiMessage(userMsg);
     }
 
-    const doc = documents.find((d: any) => d.id === selectedFileId);
+    // Resolve context document from the active chat's file_id to preserve focus
+    const activeChat = chatsList.find(c => c.id === chatId);
+    const contextFileId = activeChat ? activeChat.file_id : selectedFileId;
+    const doc = documents.find((d: any) => d.id === contextFileId);
     const contextText = doc ? doc.content_extracted || '' : '';
 
     const activeKeys = apiKeys ? apiKeys.filter((k: any) => k.isActive) : [];
@@ -4044,7 +4063,11 @@ function StudyAssistantScreen({ documents, apiKeys, runQueryWithFallback }: any)
             <h3 className="body-sm label-md" style={{ color: 'var(--color-outline)', marginBottom: '8px' }}>Context Document</h3>
             <select
               value={selectedFileId}
-              onChange={(e) => setSelectedFileId(e.target.value)}
+              onChange={(e) => {
+                setSelectedFileId(e.target.value);
+                setActiveChatId(null);
+                setChatMessages([]);
+              }}
               style={{
                 width: '100%',
                 background: 'var(--color-surface-container)',
@@ -4083,7 +4106,10 @@ function StudyAssistantScreen({ documents, apiKeys, runQueryWithFallback }: any)
               return (
                 <div
                   key={chat.id}
-                  onClick={() => setActiveChatId(chat.id)}
+                  onClick={() => {
+                    setActiveChatId(chat.id);
+                    setSelectedFileId(chat.file_id || '');
+                  }}
                   style={{
                     padding: '10px 12px',
                     backgroundColor: activeChatId === chat.id ? 'var(--color-surface-container-high)' : 'var(--color-surface-container)',
@@ -4840,7 +4866,30 @@ function SettingsScreen({ apiKeys, onSaveKeys }: any) {
                 border: '4px solid var(--color-surface)'
               }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="body-md" style={{ fontWeight: '700', color: 'var(--color-primary-fixed)' }}>Version 1.0.4</h3>
+                <h3 className="body-md" style={{ fontWeight: '700', color: 'var(--color-primary-fixed)' }}>Version 1.0.5</h3>
+                <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>June 2026</span>
+              </div>
+              <ul style={{ paddingLeft: '16px', marginTop: '8px', listStyleType: 'disc', fontSize: '13px', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <li><strong>API Rate Limit Detection:</strong> Automatically detects rate limit responses (HTTP 429 status code) across Gemini, OpenAI, Anthropic, OpenRouter, and Ollama, alerting the user via visual error notifications.</li>
+                <li><strong>Context-Carrying Chat Threads:</strong> Improved the Study Assistant page to fetch and utilize text contexts from the document associated with the active chat thread rather than relying strictly on the filter dropdown selection.</li>
+                <li><strong>Dynamic Dropdown Defaulting:</strong> Opening a document in the reader automatically registers and selects that document in the Study Assistant dropdown as context.</li>
+                <li><strong>Sidebar-Dropdown Synchronization:</strong> Selecting a chat history item in the Study Assistant sidebar automatically updates the document selection dropdown to reflect the chat's source document.</li>
+              </ul>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                position: 'absolute',
+                left: '-27px',
+                top: '4px',
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--color-secondary)',
+                border: '4px solid var(--color-surface)'
+              }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="body-md" style={{ fontWeight: '700', color: 'var(--color-secondary)' }}>Version 1.0.4</h3>
                 <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>June 2026</span>
               </div>
               <ul style={{ paddingLeft: '16px', marginTop: '8px', listStyleType: 'disc', fontSize: '13px', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
