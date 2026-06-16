@@ -154,7 +154,7 @@ export default function App() {
 
     // Dynamic OTA Update Check
     const checkUpdates = async () => {
-      const currentVersion = '1.0.3';
+      const currentVersion = '1.0.4';
       localStorage.setItem('studyvault_version', currentVersion);
 
       const isDismissed = localStorage.getItem('studyvault_ota_dismissed') === 'true';
@@ -4828,6 +4828,31 @@ function SettingsScreen({ apiKeys, onSaveKeys }: any) {
           <h2 className="headline-sm" style={{ marginBottom: '24px' }}>Release Changelog Timeline</h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', position: 'relative', paddingLeft: '20px', borderLeft: '2px solid var(--color-outline-variant)' }}>
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                position: 'absolute',
+                left: '-27px',
+                top: '4px',
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--color-primary-fixed)',
+                border: '4px solid var(--color-surface)'
+              }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="body-md" style={{ fontWeight: '700', color: 'var(--color-primary-fixed)' }}>Version 1.0.4</h3>
+                <span style={{ fontSize: '11px', color: 'var(--color-outline)' }}>June 2026</span>
+              </div>
+              <ul style={{ paddingLeft: '16px', marginTop: '8px', listStyleType: 'disc', fontSize: '13px', color: 'var(--color-on-surface-variant)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <li><strong>Dynamic Model Discovery:</strong> Dynamically loads model lists from OpenAI, Anthropic, Gemini, OpenRouter, and Ollama with in-memory caching.</li>
+                <li><strong>Settings Datalists:</strong> Replaced select elements with custom text datalists for free-text model override entry.</li>
+                <li><strong>Manual Refresh & Auto-Timer:</strong> Added manual Refresh button next to model inputs and a daily 24h timer to sync cached models.</li>
+                <li><strong>Reader Text Extraction:</strong> Automatically extracts context text from files on-the-fly when opening documents.</li>
+                <li><strong>Split View Styling:</strong> Redesigned exit toggle button in reader to align with toolbar layout, styled as a grey Single View button.</li>
+                <li><strong>Study Assistant Source Badges:</strong> Display document name tags or "Global Query" in Study Assistant sidebar chat lists.</li>
+              </ul>
+            </div>
+
             <div style={{ position: 'relative' }}>
               <div style={{
                 position: 'absolute',

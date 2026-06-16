@@ -1,6 +1,6 @@
 {
   "name": "studyvault",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Offline-first academic document system with optional AI enhancements",
   "main": "dist/main/index.js",
   "scripts": {
