@@ -55,10 +55,9 @@ interface ReadingHistoryRecord {
 export default function App() {
   const [activeTab, setActiveTab] = useState<'library' | 'reader' | 'converter' | 'history'>('library');
   const [selectedFolder, setSelectedFolder] = useState<'all' | 'lectures' | 'research' | 'uncategorized'>('all');
-  const [latestRelease, setLatestRelease] = useState<{ version: string; installerUrl: string; portableUrl: string }>({
-    version: 'v1.0.0',
-    installerUrl: 'https://github.com/wilfredkimura/studyvault/releases/download/v1.0.0/StudyVault_Setup_1.0.0.exe',
-    portableUrl: 'https://github.com/wilfredkimura/studyvault/releases/download/v1.0.0/StudyVault_1.0.0.exe'
+  const [latestRelease, setLatestRelease] = useState<{ version: string; installerUrl: string }>({
+    version: 'Latest',
+    installerUrl: 'https://github.com/wilfredkimura/studyvault/releases/latest'
   });
 
   // Simulator State
@@ -145,30 +144,24 @@ export default function App() {
         return res.json();
       })
       .then(data => {
-        const tag = data.tag_name || 'v1.0.0';
+        const tag = data.tag_name || 'Latest';
         let installer = '';
-        let portable = '';
 
         if (data.assets && Array.isArray(data.assets)) {
           const instAsset = data.assets.find((a: any) => a.name.includes('Setup') && a.name.endsWith('.exe'));
-          const portAsset = data.assets.find((a: any) => !a.name.includes('Setup') && a.name.endsWith('.exe'));
-
           if (instAsset) installer = instAsset.browser_download_url;
-          if (portAsset) portable = portAsset.browser_download_url;
         }
 
-        // Fallbacks if assets are not matched perfectly
-        if (!installer) {
-          installer = `https://github.com/wilfredkimura/studyvault/releases/download/${tag}/StudyVault_Setup_${tag.replace('v', '')}.exe`;
-        }
-        if (!portable) {
-          portable = `https://github.com/wilfredkimura/studyvault/releases/download/${tag}/StudyVault_${tag.replace('v', '')}.exe`;
+        // Fallback if assets are not matched perfectly
+        if (!installer && tag !== 'Latest') {
+          installer = `https://github.com/wilfredkimura/studyvault/releases/download/${tag}/StudyVault%20Setup%20${tag.replace('v', '')}.exe`;
+        } else if (!installer) {
+          installer = 'https://github.com/wilfredkimura/studyvault/releases/latest';
         }
 
         setLatestRelease({
           version: tag,
-          installerUrl: installer,
-          portableUrl: portable
+          installerUrl: installer
         });
       })
       .catch(err => {
